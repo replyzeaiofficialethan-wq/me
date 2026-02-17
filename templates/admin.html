@@ -1,871 +1,1822 @@
 <!-- templates/admin.html -->
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Cold Outreach System</title>
+  <title>ReplyzeAI — Cold Outreach System</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@300;400;500;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
+
   <style>
-    body{font-family:Inter,system-ui,Segoe UI,Arial;padding:30px;background:#f3f4f6}
-    .wrap{max-width:1200px;margin:0 auto}
-    .card{background:white;padding:18px;border-radius:8px;box-shadow:0 6px 18px rgba(15,23,42,.06);margin-bottom:16px}
-    input,textarea,button,select{width:100%;padding:10px;margin-top:8px;border:1px solid #e5e7eb;border-radius:6px}
-    button{background:#1f2937;color:white;border:0;cursor:pointer}
-    .section{margin-bottom:20px}
-    .followup-section{border-left:3px solid #e5e7eb;padding-left:15px;margin-bottom:15px}
-    .tab{display:none}
-    .tab.active{display:block}
-    .tab-buttons{margin-bottom:20px}
-    .tab-button{display:inline-block;padding:10px 20px;background:#e5e7eb;cursor:pointer;margin-right:5px}
-    .tab-button.active{background:#1f2937;color:white}
-    table{width:100%;border-collapse:collapse}
-    th,td{padding:10px;text-align:left;border-bottom:1px solid #e5e7eb}
-    .account-status {display: flex; align-items: center; margin-bottom: 10px;}
-    .status-indicator {width: 12px; height: 12px; border-radius: 50%; margin-right: 10px;}
-    .status-good {background-color: #10B981;}
-    .status-warning {background-color: #F59E0B;}
-    .status-error {background-color: #EF4444;}
-    .workflow-status {margin-top: 20px; padding: 10px; border-radius: 5px; background: #f8f9fa;}
-    .workflow-success {background: #d1e7dd; color: #0f5132;}
-    .workflow-failure {background: #f8d7da; color: #842029;}
-    .workflow-pending {background: #fff3cd; color: #664d03;}
+    /* ═══════════════════════════════════════════════
+       TOKENS
+    ═══════════════════════════════════════════════ */
+    :root {
+      --bg0:       #03030a;
+      --bg1:       #07070f;
+      --bg2:       #0d0d1a;
+      --bg3:       #111122;
+      --panel:     rgba(13,13,26,0.92);
+      --border:    rgba(0,255,157,0.12);
+      --border-hi: rgba(0,255,157,0.4);
+      --neon:      #00ff9d;
+      --neon-dim:  rgba(0,255,157,0.6);
+      --neon-glow: 0 0 18px rgba(0,255,157,0.35), 0 0 40px rgba(0,255,157,0.12);
+      --pink:      #ff2d6b;
+      --pink-dim:  rgba(255,45,107,0.6);
+      --cyan:      #00d4ff;
+      --amber:     #ffb020;
+      --text:      #d6e4f7;
+      --text-dim:  #607080;
+      --text-mute: #3a4a5a;
+      --font-head: 'Oxanium', sans-serif;
+      --font-mono: 'DM Mono', monospace;
+      --radius:    6px;
+      --radius-lg: 10px;
+      --transition: 0.18s ease;
+    }
+
+    /* ═══════════════════════════════════════════════
+       RESET + BASE
+    ═══════════════════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-mono);
+      background: var(--bg0);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* animated grid background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,255,157,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,255,157,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* scanline shimmer */
+    body::after {
+      content: '';
+      position: fixed;
+      top: -100%;
+      left: 0;
+      width: 100%;
+      height: 200%;
+      background: linear-gradient(
+        to bottom,
+        transparent 0%,
+        rgba(0,255,157,0.025) 50%,
+        transparent 100%
+      );
+      animation: scanline 8s linear infinite;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    @keyframes scanline {
+      0%   { transform: translateY(0); }
+      100% { transform: translateY(50%); }
+    }
+
+    /* ═══════════════════════════════════════════════
+       LAYOUT
+    ═══════════════════════════════════════════════ */
+    .layout {
+      display: flex;
+      min-height: 100vh;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      width: 240px;
+      flex-shrink: 0;
+      background: var(--bg1);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+
+    .sidebar-logo {
+      padding: 28px 20px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .sidebar-logo .logo-mark {
+      font-family: var(--font-head);
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--neon);
+      letter-spacing: 0.04em;
+      text-shadow: var(--neon-glow);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sidebar-logo .logo-mark::before {
+      content: '⬡';
+      font-size: 22px;
+      animation: pulse-hex 3s ease-in-out infinite;
+    }
+
+    @keyframes pulse-hex {
+      0%, 100% { opacity: 1; text-shadow: var(--neon-glow); }
+      50%       { opacity: 0.6; text-shadow: none; }
+    }
+
+    .sidebar-logo .logo-sub {
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-top: 4px;
+      font-family: var(--font-head);
+    }
+
+    .nav-section {
+      padding: 16px 12px 8px;
+    }
+
+    .nav-section-label {
+      font-size: 9px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-mute);
+      font-family: var(--font-head);
+      padding: 0 8px;
+      margin-bottom: 6px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-dim);
+      border: 1px solid transparent;
+      transition: var(--transition);
+      margin-bottom: 2px;
+      font-family: var(--font-head);
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      user-select: none;
+    }
+
+    .nav-item:hover {
+      color: var(--text);
+      background: rgba(0,255,157,0.05);
+      border-color: var(--border);
+    }
+
+    .nav-item.active {
+      color: var(--neon);
+      background: rgba(0,255,157,0.08);
+      border-color: rgba(0,255,157,0.25);
+      box-shadow: inset 3px 0 0 var(--neon);
+    }
+
+    .nav-icon {
+      font-size: 16px;
+      width: 20px;
+      text-align: center;
+    }
+
+    .sidebar-footer {
+      margin-top: auto;
+      padding: 16px 20px;
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-mute);
+      font-family: var(--font-head);
+    }
+
+    /* ── MAIN ── */
+    .main {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      padding: 18px 32px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(7,7,15,0.8);
+      backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .topbar-title {
+      font-family: var(--font-head);
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .topbar-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--neon);
+      box-shadow: 0 0 8px var(--neon);
+      animation: blink 2s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.4; }
+    }
+
+    .content {
+      flex: 1;
+      padding: 32px;
+      max-width: 1200px;
+      width: 100%;
+    }
+
+    /* ── TABS ── */
+    .tab { display: none; }
+    .tab.active { display: block; }
+
+    /* ═══════════════════════════════════════════════
+       CARDS
+    ═══════════════════════════════════════════════ */
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      margin-bottom: 20px;
+      position: relative;
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--neon-dim), transparent);
+      opacity: 0.4;
+    }
+
+    .card:hover {
+      border-color: rgba(0,255,157,0.22);
+    }
+
+    .card-title {
+      font-family: var(--font-head);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--neon);
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-title::before {
+      content: '';
+      width: 3px; height: 16px;
+      background: var(--neon);
+      border-radius: 2px;
+      box-shadow: 0 0 8px var(--neon);
+    }
+
+    /* ═══════════════════════════════════════════════
+       FORMS
+    ═══════════════════════════════════════════════ */
+    .form-group {
+      margin-bottom: 14px;
+    }
+
+    label.field-label {
+      display: block;
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      font-family: var(--font-head);
+      margin-bottom: 6px;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="number"],
+    input[type="file"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 10px 13px;
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(0,255,157,0.15);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      outline: none;
+      transition: var(--transition);
+      resize: vertical;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--neon);
+      box-shadow: 0 0 0 3px rgba(0,255,157,0.08), inset 0 0 0 1px rgba(0,255,157,0.1);
+      background: rgba(0,255,157,0.03);
+    }
+
+    input[type="file"] {
+      cursor: pointer;
+      color: var(--text-dim);
+    }
+
+    select option {
+      background: var(--bg2);
+      color: var(--text);
+    }
+
+    input[type="checkbox"] {
+      width: auto;
+      accent-color: var(--neon);
+      margin-right: 8px;
+      cursor: pointer;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      margin: 12px 0;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    /* ═══════════════════════════════════════════════
+       BUTTONS
+    ═══════════════════════════════════════════════ */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 18px;
+      border-radius: var(--radius);
+      font-family: var(--font-head);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      border: none;
+      transition: var(--transition);
+      outline: none;
+    }
+
+    .btn-primary {
+      background: var(--neon);
+      color: #030310;
+      box-shadow: 0 0 14px rgba(0,255,157,0.3);
+    }
+
+    .btn-primary:hover {
+      background: #00ffb0;
+      box-shadow: 0 0 24px rgba(0,255,157,0.55);
+      transform: translateY(-1px);
+    }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--neon);
+      border: 1px solid rgba(0,255,157,0.35);
+    }
+
+    .btn-outline:hover {
+      background: rgba(0,255,157,0.08);
+      border-color: var(--neon);
+      box-shadow: 0 0 12px rgba(0,255,157,0.2);
+    }
+
+    .btn-ghost {
+      background: rgba(255,255,255,0.04);
+      color: var(--text-dim);
+      border: 1px solid rgba(255,255,255,0.07);
+    }
+
+    .btn-ghost:hover {
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+    }
+
+    .btn-danger {
+      background: transparent;
+      color: var(--pink);
+      border: 1px solid rgba(255,45,107,0.3);
+    }
+
+    .btn-danger:hover {
+      background: rgba(255,45,107,0.1);
+      border-color: var(--pink);
+    }
+
+    .btn-sm {
+      padding: 5px 10px;
+      font-size: 10px;
+    }
+
+    .btn-full {
+      width: 100%;
+      justify-content: center;
+      margin-top: 8px;
+    }
+
+    /* ═══════════════════════════════════════════════
+       TABLES
+    ═══════════════════════════════════════════════ */
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    thead {
+      background: rgba(0,255,157,0.04);
+    }
+
+    th {
+      padding: 12px 16px;
+      text-align: left;
+      font-family: var(--font-head);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--neon-dim);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(0,255,157,0.05);
+      color: var(--text);
+      vertical-align: middle;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    tbody tr {
+      transition: background var(--transition);
+    }
+
+    tbody tr:hover {
+      background: rgba(0,255,157,0.03);
+    }
+
+    /* ═══════════════════════════════════════════════
+       STATUS BADGES
+    ═══════════════════════════════════════════════ */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-size: 10px;
+      font-family: var(--font-head);
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .badge-green {
+      background: rgba(0,255,157,0.1);
+      color: var(--neon);
+      border: 1px solid rgba(0,255,157,0.25);
+    }
+
+    .badge-amber {
+      background: rgba(255,176,32,0.1);
+      color: var(--amber);
+      border: 1px solid rgba(255,176,32,0.25);
+    }
+
+    .badge-red {
+      background: rgba(255,45,107,0.1);
+      color: var(--pink);
+      border: 1px solid rgba(255,45,107,0.25);
+    }
+
+    .badge-cyan {
+      background: rgba(0,212,255,0.1);
+      color: var(--cyan);
+      border: 1px solid rgba(0,212,255,0.25);
+    }
+
+    /* ═══════════════════════════════════════════════
+       PROGRESS BARS
+    ═══════════════════════════════════════════════ */
+    .progress-bar {
+      width: 100%;
+      height: 4px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.5s ease;
+    }
+
+    .progress-fill.good   { background: var(--neon);  box-shadow: 0 0 8px var(--neon); }
+    .progress-fill.warn   { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+    .progress-fill.danger { background: var(--pink);  box-shadow: 0 0 8px var(--pink); }
+
+    /* ═══════════════════════════════════════════════
+       STATUS ALERTS
+    ═══════════════════════════════════════════════ */
+    .alert {
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      margin-top: 12px;
+      border-left: 3px solid;
+    }
+
+    .alert-success { background: rgba(0,255,157,0.07);  border-color: var(--neon);  color: var(--neon); }
+    .alert-error   { background: rgba(255,45,107,0.07); border-color: var(--pink);  color: var(--pink); }
+    .alert-info    { background: rgba(0,212,255,0.07);  border-color: var(--cyan);  color: var(--cyan); }
+    .alert-warn    { background: rgba(255,176,32,0.07); border-color: var(--amber); color: var(--amber); }
+
+    /* ═══════════════════════════════════════════════
+       STAT CARDS
+    ═══════════════════════════════════════════════ */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px 20px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at top left, rgba(0,255,157,0.04) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .stat-label {
+      font-family: var(--font-head);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-mute);
+      margin-bottom: 10px;
+    }
+
+    .stat-value {
+      font-family: var(--font-head);
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--neon);
+      line-height: 1;
+      text-shadow: 0 0 20px rgba(0,255,157,0.4);
+    }
+
+    .stat-sub {
+      font-size: 11px;
+      color: var(--text-mute);
+      margin-top: 4px;
+    }
+
+    /* ═══════════════════════════════════════════════
+       SPINTAX HELPER
+    ═══════════════════════════════════════════════ */
+    .spintax-helper {
+      background: rgba(0,212,255,0.04);
+      border: 1px solid rgba(0,212,255,0.18);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .spintax-helper strong {
+      color: var(--cyan);
+      font-family: var(--font-head);
+      font-size: 11px;
+      letter-spacing: 0.1em;
+    }
+
+    .spintax-example {
+      font-family: var(--font-mono);
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(0,212,255,0.15);
+      border-radius: 4px;
+      padding: 6px 10px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--cyan);
+      word-break: break-all;
+    }
+
+    /* ═══════════════════════════════════════════════
+       FOLLOW-UP SECTION
+    ═══════════════════════════════════════════════ */
+    .followup-block {
+      border: 1px solid var(--border);
+      border-left: 3px solid rgba(0,255,157,0.3);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 12px;
+      background: rgba(0,0,0,0.2);
+    }
+
+    .followup-block .followup-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .followup-block .followup-title {
+      font-family: var(--font-head);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    /* ═══════════════════════════════════════════════
+       WORKFLOW STATUS
+    ═══════════════════════════════════════════════ */
+    .workflow-run {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 8px;
+      background: rgba(0,0,0,0.2);
+    }
+
+    .run-id {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-mute);
+      min-width: 80px;
+    }
+
+    .run-time {
+      font-size: 12px;
+      color: var(--text-dim);
+      flex: 1;
+    }
+
+    /* ═══════════════════════════════════════════════
+       ACCOUNT STATUS CARD
+    ═══════════════════════════════════════════════ */
+    .account-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 16px 18px;
+      margin-bottom: 10px;
+      background: rgba(0,0,0,0.25);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .account-indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .account-indicator.good   { background: var(--neon);  box-shadow: 0 0 8px var(--neon); }
+    .account-indicator.warn   { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+    .account-indicator.danger { background: var(--pink);  box-shadow: 0 0 8px var(--pink); }
+
+    .account-info { flex: 1; min-width: 0; }
+    .account-email {
+      font-size: 13px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .account-name {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .account-stats {
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .account-count {
+      font-family: var(--font-head);
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .account-limit {
+      font-size: 10px;
+      color: var(--text-mute);
+    }
+
+    .account-bar-wrap { flex-shrink: 0; width: 120px; }
+
+    /* ═══════════════════════════════════════════════
+       EMPTY STATE
+    ═══════════════════════════════════════════════ */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-mute);
+    }
+
+    .empty-state-icon {
+      font-size: 36px;
+      margin-bottom: 12px;
+      opacity: 0.4;
+    }
+
+    .empty-state p {
+      font-size: 13px;
+    }
+
+    /* ═══════════════════════════════════════════════
+       PAGE HEADER
+    ═══════════════════════════════════════════════ */
+    .page-header {
+      margin-bottom: 28px;
+    }
+
+    .page-header h2 {
+      font-family: var(--font-head);
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+
+    .page-header p {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 6px;
+    }
+
+    /* ═══════════════════════════════════════════════
+       GRID UTILITIES
+    ═══════════════════════════════════════════════ */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+    @media (max-width: 860px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+
+    /* ═══════════════════════════════════════════════
+       SCROLLBAR
+    ═══════════════════════════════════════════════ */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg1); }
+    ::-webkit-scrollbar-thumb { background: rgba(0,255,157,0.2); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(0,255,157,0.4); }
+
+    /* ═══════════════════════════════════════════════
+       LOADING PULSE
+    ═══════════════════════════════════════════════ */
+    .skeleton {
+      background: linear-gradient(90deg,
+        rgba(255,255,255,0.03) 25%,
+        rgba(255,255,255,0.07) 50%,
+        rgba(255,255,255,0.03) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: var(--radius);
+      height: 14px;
+    }
+
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* ═══════════════════════════════════════════════
+       INLINE CODE
+    ═══════════════════════════════════════════════ */
+    code {
+      font-family: var(--font-mono);
+      background: rgba(0,255,157,0.07);
+      color: var(--neon);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Cold Outreach System</h1>
-    
-    <div class="tab-buttons">
-      <div class="tab-button active" onclick="showTab('import')">Import Leads</div>
-      <div class="tab-button" onclick="showTab('campaigns')">Campaigns</div>
-      <div class="tab-button" onclick="showTab('templates')">Templates</div>
-      <div class="tab-button" onclick="showTab('analytics')">Analytics</div>
-      <div class="tab-button" onclick="showTab('smtp')">SMTP Accounts</div>
-      <div class="tab-button" onclick="showTab('status')">Account Status</div>
-      <div class="tab-button" onclick="showTab('responded')">Responded Leads</div>
-      <div class="tab-button" onclick="showTab('workflow')">Workflow</div>
+
+<div class="layout">
+
+  <!-- ══════════ SIDEBAR ══════════ -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-mark">ReplyzeAI</div>
+      <div class="logo-sub">Cold Outreach System</div>
     </div>
-    
-    <!-- Import Leads Tab -->
-    <div id="import" class="tab active">
-      <div class="card">
-        <h3>Import Leads (CSV)</h3>
-        <p>CSV must include columns: email, name, city, brokerage, service. Other columns will be stored as custom fields.</p>
-        <input type="file" id="csvFile" accept=".csv">
-        <input type="text" id="listName" placeholder="List name (e.g. 'NYC Real Estate Agents')">
-        <button onclick="importLeads()">Import Leads</button>
-        <div id="importStatus"></div>
+
+    <div class="nav-section">
+      <div class="nav-section-label">Outreach</div>
+      <div class="nav-item active" onclick="showTab('import')"     id="nav-import">
+        <span class="nav-icon">📥</span> Import Leads
       </div>
-      
-      <div class="card">
-        <h3>Current Lists</h3>
-        <div id="listsContainer">Loading...</div>
+      <div class="nav-item" onclick="showTab('campaigns')"  id="nav-campaigns">
+        <span class="nav-icon">🚀</span> Campaigns
+      </div>
+      <div class="nav-item" onclick="showTab('templates')"  id="nav-templates">
+        <span class="nav-icon">📝</span> Templates
       </div>
     </div>
-    
-    <!-- Campaigns Tab -->
-    <div id="campaigns" class="tab">
-      <div class="card">
-        <h3>Create New Campaign</h3>
-        <input id="campaignName" placeholder="Campaign name">
-        <select id="campaignList">
-          <option value="">Select a list</option>
-        </select>
-        <input id="campaignSubject" placeholder="Email subject (use {name}, {city}, etc.)">
-        <textarea id="campaignBody" placeholder="Email body (HTML with variables like {name}, {city}, {brokerage}, {service})" rows="8"></textarea>
-        
-        <div class="section">
-          <h4>Follow-up Emails</h4>
-          <div id="followups">
-            <div class="followup-section">
-              <input class="followup-days" type="number" placeholder="Days after previous" value="2" min="1">
-              <input class="followup-subject" placeholder="Follow-up subject">
-              <textarea class="followup-body" placeholder="Follow-up body" rows="4"></textarea>
+
+    <div class="nav-section">
+      <div class="nav-section-label">Insights</div>
+      <div class="nav-item" onclick="showTab('analytics')"  id="nav-analytics">
+        <span class="nav-icon">📊</span> Analytics
+      </div>
+      <div class="nav-item" onclick="showTab('responded')"  id="nav-responded">
+        <span class="nav-icon">💬</span> Responded
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-section-label">System</div>
+      <div class="nav-item" onclick="showTab('smtp')"       id="nav-smtp">
+        <span class="nav-icon">📡</span> SMTP Accounts
+      </div>
+      <div class="nav-item" onclick="showTab('status')"     id="nav-status">
+        <span class="nav-icon">⚡</span> Account Status
+      </div>
+      <div class="nav-item" onclick="showTab('workflow')"   id="nav-workflow">
+        <span class="nav-icon">⚙️</span> Workflow
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      v2.0 — spintax enabled
+    </div>
+  </nav>
+
+  <!-- ══════════ MAIN ══════════ -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title" id="topbarTitle">Import Leads</div>
+      <div class="topbar-status">
+        <div class="status-dot"></div>
+        <span>System Online</span>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ─────────────────── IMPORT ─────────────────── -->
+      <div id="import" class="tab active">
+        <div class="page-header">
+          <h2>Import Leads</h2>
+          <p>Upload a CSV file to create a new lead list. Required column: <code>email</code>. Optional: name, city, brokerage, service, etc.</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Upload CSV</div>
+            <div class="form-group">
+              <label class="field-label">CSV File</label>
+              <input type="file" id="csvFile" accept=".csv">
+            </div>
+            <div class="form-group">
+              <label class="field-label">List Name</label>
+              <input type="text" id="listName" placeholder="e.g. NYC Real Estate Q1">
+            </div>
+            <button class="btn btn-primary btn-full" onclick="importLeads()">
+              ⬆ Import Leads
+            </button>
+            <div id="importStatus"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Current Lists</div>
+            <div id="listsContainer">
+              <div class="skeleton" style="margin-bottom:8px"></div>
+              <div class="skeleton" style="width:70%"></div>
             </div>
           </div>
-          <button onclick="addFollowup()">+ Add Follow-up</button>
         </div>
-        
-        <label>
-          <input type="checkbox" id="sendImmediately"> Send initial emails immediately
-        </label>
-        
-        <button onclick="createCampaign()">Create Campaign</button>
-        <div id="campaignStatus"></div>
       </div>
-      
-      <div class="card">
-        <h3>Existing Campaigns</h3>
-        <div id="campaignsContainer">Loading...</div>
-      </div>
-    </div>
-    
-    <!-- Templates Tab -->
-    <div id="templates" class="tab">
-      <div class="card">
-        <h3>Email Templates</h3>
-        <p>Available variables: {name}, {email}, {city}, {brokerage}, {service}, and any other columns from your CSV.</p>
-        <div id="templatesContainer">Loading...</div>
-      </div>
-    </div>
-    
-    <!-- SMTP Accounts Tab -->
-    <div id="smtp" class="tab">
-      <div class="card">
-        <h3>Add SMTP Account</h3>
-        <input type="email" id="smtpEmail" placeholder="Email address">
-        <input type="text" id="smtpDisplayName" placeholder="Display name">
-        <input type="text" id="smtpHost" placeholder="SMTP Host (e.g., smtp.gmail.com)">
-        <input type="number" id="smtpPort" placeholder="SMTP Port (e.g., 587)" value="587">
-        <input type="text" id="smtpUsername" placeholder="SMTP Username (usually your email)">
-        <input type="password" id="smtpPassword" placeholder="SMTP Password">
-        <input type="text" id="imapHost" placeholder="IMAP Host (optional)">
-        <input type="number" id="imapPort" placeholder="IMAP Port (optional)" value="993">
-        <button onclick="addSmtpAccount()">Add SMTP Account</button>
-        <div id="smtpStatus"></div>
-      </div>
-      <div class="card">
-        <h3>Existing SMTP Accounts</h3>
-        <div id="smtpAccountsContainer">Loading...</div>
-      </div>
-    </div>
-    
-    <!-- Account Status Tab -->
-    <div id="status" class="tab">
-      <div class="card">
-        <h3>Account Sending Status</h3>
-        <p>Daily limit: 50 emails per account</p>
-        <div id="accountStatusContainer">Loading...</div>
-      </div>
-    </div>
-<!--------------------------------------------------------------------->
-<!-- Add this to the tab buttons section -->
 
+      <!-- ─────────────────── CAMPAIGNS ─────────────────── -->
+      <div id="campaigns" class="tab">
+        <div class="page-header">
+          <h2>Campaigns</h2>
+          <p>Create multi-step email campaigns with spintax variation built in.</p>
+        </div>
 
-<!-- Add this as a new tab -->
-<div id="analytics" class="tab">
-  <div class="card">
-    <h3>Link Click Analytics</h3>
-    
-    <div class="campaign-selector">
-      <select id="campaignSelect">
-        <option value="">Select a campaign</option>
-      </select>
-    </div>
-    
-    <div id="clickAnalytics">
-      <table>
-        <thead>
-          <tr>
-            <th>Lead Email</th>
-            <th>URL Clicked</th>
-            <th>Time</th>
-            <th>AI Demo Used</th> <!-- New column -->
-          </tr>
-        </thead>
-        <tbody id="clickData">
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
-<!---------------------------------------->
+        <div class="card">
+          <div class="card-title">Create New Campaign</div>
 
-    
-    <!-- Responded Leads Tab -->
-    <div id="responded" class="tab">
-      <div class="card">
-        <h3>Leads Who Have Responded</h3>
-        <div id="respondedLeadsContainer">Loading...</div>
-      </div>
-    </div>
-    
-    <!-- Workflow Tab -->
-    <div id="workflow" class="tab">
-      <div class="card">
-        <h3>GitHub Actions Workflow</h3>
-        <p>Trigger the email sending process manually or view the status of recent runs.</p>
-        <button onclick="triggerWorkflow()">Run Email Sending Now</button>
-        <div id="workflowStatus"></div>
-      </div>
-      
-      <div class="card">
-        <h3>Recent Workflow Runs</h3>
-        <div id="workflowRunsContainer">Loading workflow runs...</div>
-      </div>
-    </div>
-  </div>
+          <div class="spintax-helper">
+            <strong>⚡ Spintax Engine Active</strong> — use <code>{{option A|option B|option C}}</code> in subjects &amp; bodies.<br>
+            Each recipient receives a randomly picked permutation — unlimited unique messages.
+            <div class="spintax-example">{{Hi|Hello|Hey}} {name}, {{I noticed|I saw|I came across}} your work at {brokerage}...</div>
+          </div>
 
-  <script>
-    let currentLists = [];
-    let currentCampaigns = [];
-    let smtpAccounts = [];
-    let accountStatuses = [];
-    let respondedLeads = [];
-    
-    function showTab(tabName) {
-      document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-      document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
-      document.getElementById(tabName).classList.add('active');
-      document.querySelector(`.tab-button[onclick="showTab('${tabName}')"]`).classList.add('active');
-      
-      if (tabName === 'campaigns') {
-        loadLists();
-        loadCampaigns();
-      } else if (tabName === 'import') {
-        loadLists();
-      } else if (tabName === 'templates') {
-        loadTemplates();
-      } else if (tabName === 'analytics') {
-        loadCampaignsForAnalytics();
-      } else if (tabName === 'smtp') {
-        loadSmtpAccounts();
-      } else if (tabName === 'status') {
-        loadAccountStatus();
-      } else if (tabName === 'responded') {
-        loadRespondedLeads();
-      } else if (tabName === 'workflow') {
-        loadWorkflowRuns();
-      }
-    }
-    
-    async function loadLists() {
-      try {
-        const response = await fetch('/api/leads/lists');
-        if (response.ok) {
-          const data = await response.json();
-          currentLists = data.lists || [];
-          renderLists();
-          populateListDropdown();
-        } else {
-          console.error('Failed to load lists:', response.status);
-        }
-      } catch (error) {
-        console.error('Error loading lists:', error);
-      }
-    }
-    
-    function renderLists() {
-      const container = document.getElementById('listsContainer');
-      if (currentLists.length === 0) {
-        container.innerHTML = '<p>No lists yet. Import a CSV to create your first list.</p>';
-        return;
-      }
-      
-      let html = '<table><tr><th>List Name</th><th>Lead Count</th><th>Actions</th></tr>';
-      currentLists.forEach(list => {
-        html += `<tr>
-          <td>${list.list_name}</td>
-          <td>${list.lead_count}</td>
-          <td><button onclick="viewList('${list.list_name}')">View</button></td>
-        </tr>`;
-      });
-      html += '</table>';
-      container.innerHTML = html;
-    }
-    
-    function populateListDropdown() {
-      const dropdown = document.getElementById('campaignList');
-      dropdown.innerHTML = '<option value="">Select a list</option>';
-      currentLists.forEach(list => {
-        dropdown.innerHTML += `<option value="${list.list_name}">${list.list_name} (${list.lead_count} leads)</option>`;
-      });
-    }
-    
-    async function importLeads() {
-      const fileInput = document.getElementById('csvFile');
-      const listName = document.getElementById('listName').value;
-      const status = document.getElementById('importStatus');
-      
-      if (!fileInput.files.length) {
-        status.innerText = 'Please select a CSV file';
-        return;
-      }
-      
-      if (!listName) {
-        status.innerText = 'Please enter a list name';
-        return;
-      }
-      
-      const formData = new FormData();
-      formData.append('file', fileInput.files[0]);
-      formData.append('list_name', listName);
-      
-      status.innerText = 'Uploading...';
-      
-      try {
-        const response = await fetch('/api/leads/import', {
-          method: 'POST',
-          body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-          status.innerText = `Successfully imported ${data.imported} leads.`;
-          fileInput.value = '';
-          document.getElementById('listName').value = '';
-          loadLists();
-        } else {
-          status.innerText = `Error: ${data.error}`;
-        }
-      } catch (error) {
-        status.innerText = 'Error uploading file';
-        console.error('Upload error:', error);
-      }
-    }
-    
-    function addFollowup() {
-      const container = document.getElementById('followups');
-      const newFollowup = document.createElement('div');
-      newFollowup.className = 'followup-section';
-      newFollowup.innerHTML = `
-        <input class="followup-days" type="number" placeholder="Days after previous" value="2" min="1">
-        <input class="followup-subject" placeholder="Follow-up subject">
-        <textarea class="followup-body" placeholder="Follow-up body" rows="4"></textarea>
-        <button onclick="this.parentNode.remove()">Remove</button>
-      `;
-      container.appendChild(newFollowup);
-    }
-    
-    async function createCampaign() {
-      const name = document.getElementById('campaignName').value;
-      const list = document.getElementById('campaignList').value;
-      const subject = document.getElementById('campaignSubject').value;
-      const body = document.getElementById('campaignBody').value;
-      const sendImmediately = document.getElementById('sendImmediately').checked;
-      const status = document.getElementById('campaignStatus');
-      
-      if (!name || !list || !subject || !body) {
-        status.innerText = 'Please fill all required fields';
-        return;
-      }
-      
-      // Collect follow-ups
-      const followups = [];
-      document.querySelectorAll('.followup-section').forEach(section => {
-        const days = section.querySelector('.followup-days').value;
-        const subject = section.querySelector('.followup-subject').value;
-        const body = section.querySelector('.followup-body').value;
-        
-        if (subject && body) {
-          followups.push({
-            days_after: parseInt(days),
-            subject: subject,
-            body: body
-          });
-        }
-      });
-      
-      status.innerText = 'Creating campaign...';
-      
-      try {
-        const response = await fetch('/api/campaigns', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: name,
-            list_name: list,
-            subject: subject,
-            body: body,
-            follow_ups: followups,
-            send_immediately: sendImmediately
-          })
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-          status.innerText = `Campaign created successfully!`;
-          if (sendImmediately) {
-            status.innerText += ' Initial emails queued for sending.';
-          }
-          // Clear form
-          document.getElementById('campaignName').value = '';
-          document.getElementById('campaignSubject').value = '';
-          document.getElementById('campaignBody').value = '';
-          document.getElementById('followups').innerHTML = `
-            <div class="followup-section">
-              <input class="followup-days" type="number" placeholder="Days after previous" value="2" min="1">
-              <input class="followup-subject" placeholder="Follow-up subject">
-              <textarea class="followup-body" placeholder="Follow-up body" rows="4"></textarea>
+          <div class="grid-2">
+            <div class="form-group">
+              <label class="field-label">Campaign Name</label>
+              <input id="campaignName" type="text" placeholder="Q1 Real Estate Outreach">
             </div>
-          `;
-          loadCampaigns();
-        } else {
-          status.innerText = `Error: ${data.error}`;
-        }
-      } catch (error) {
-        status.innerText = 'Error creating campaign';
-        console.error('Campaign error:', error);
-      }
-    }
-    
-    async function loadCampaigns() {
-      try {
-        const response = await fetch('/api/campaigns');
-        if (response.ok) {
-          const data = await response.json();
-          currentCampaigns = data.campaigns;
-          renderCampaigns();
-        }
-      } catch (error) {
-        console.error('Error loading campaigns:', error);
-      }
-    }
-    
-    function renderCampaigns() {
-      const container = document.getElementById('campaignsContainer');
-      if (currentCampaigns.length === 0) {
-        container.innerHTML = '<p>No campaigns yet.</p>';
-        return;
-      }
-      
-      let html = '<table><tr><th>Name</th><th>List</th><th>Created</th><th>Actions</th></tr>';
-      currentCampaigns.forEach(campaign => {
-        html += `<tr>
-          <td>${campaign.name}</td>
-          <td>${campaign.list_name}</td>
-          <td>${new Date(campaign.created_at).toLocaleDateString()}</td>
-          <td>
-            <button onclick="viewCampaign(${campaign.id})">View</button>
-            <button onclick="queueFollowup(${campaign.id}, 1)">Send Follow-up 1</button>
-          </td>
-        </tr>`;
-      });
-      html += '</table>';
-      container.innerHTML = html;
-    }
-    
-    async function queueFollowup(campaignId, sequence) {
-      try {
-        const response = await fetch('/api/queue-followup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            campaign_id: campaignId,
-            sequence: sequence
-          })
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-          alert(`Queued ${data.queued} follow-up emails`);
-        } else {
-          alert(`Error: ${data.error}`);
-        }
-      } catch (error) {
-        alert('Error queueing follow-up');
-        console.error('Queue error:', error);
-      }
-    }
-    
-    async function loadTemplates() {
-      // In a real implementation, you'd fetch templates from the server
-      const container = document.getElementById('templatesContainer');
-      container.innerHTML = `
-        <p>Sample templates will be shown here. In a full implementation, you would manage templates separately.</p>
+            <div class="form-group">
+              <label class="field-label">Lead List</label>
+              <select id="campaignList">
+                <option value="">Select a list…</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="field-label">Email Subject — spintax supported</label>
+            <input id="campaignSubject" type="text" placeholder="{{Quick question|Reaching out|Connecting}} about {brokerage}">
+          </div>
+
+          <div class="form-group">
+            <label class="field-label">Email Body — HTML + spintax supported</label>
+            <textarea id="campaignBody" rows="8" placeholder="{{Hi|Hello|Hey}} {name},&#10;&#10;{{I noticed you're with|I came across your profile at}} {brokerage} in {city}..."></textarea>
+          </div>
+
+          <div style="margin-bottom:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <span style="font-family:var(--font-head);font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim)">Follow-up Emails</span>
+              <button class="btn btn-ghost btn-sm" onclick="addFollowup()">+ Add Follow-up</button>
+            </div>
+            <div id="followups">
+              <div class="followup-block">
+                <div class="followup-header">
+                  <span class="followup-title">Follow-up #1</span>
+                </div>
+                <div class="grid-2">
+                  <div class="form-group">
+                    <label class="field-label">Days After Previous</label>
+                    <input class="followup-days" type="number" value="2" min="1">
+                  </div>
+                  <div class="form-group">
+                    <label class="field-label">Subject — spintax ok</label>
+                    <input class="followup-subject" type="text" placeholder="{{Following up|Checking in|Quick follow-up}}">
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="field-label">Body — spintax ok</label>
+                  <textarea class="followup-body" rows="4" placeholder="{{Just wanted to|Wanted to}} follow up on my previous message..."></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="checkbox-row">
+            <input type="checkbox" id="sendImmediately">
+            <label for="sendImmediately">Queue initial emails immediately</label>
+          </div>
+
+          <button class="btn btn-primary btn-full" onclick="createCampaign()">
+            🚀 Create Campaign
+          </button>
+          <div id="campaignStatus"></div>
+        </div>
+
         <div class="card">
-          <h4>Initial Outreach Template</h4>
-          <pre>
-Subject: Connecting with {name} from {brokerage}
+          <div class="card-title">Existing Campaigns</div>
+          <div id="campaignsContainer">
+            <div class="skeleton" style="margin-bottom:8px"></div>
+            <div class="skeleton" style="width:80%"></div>
+          </div>
+        </div>
+      </div>
 
-Hi {name},
+      <!-- ─────────────────── TEMPLATES ─────────────────── -->
+      <div id="templates" class="tab">
+        <div class="page-header">
+          <h2>Templates</h2>
+          <p>Reference these variables in your campaigns. All support spintax.</p>
+        </div>
 
-I noticed you're working at {brokerage} in {city}. I'd love to connect and discuss how our {service} might benefit your clients.
+        <div class="card">
+          <div class="card-title">Variable Reference</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px">
+            <code>{name}</code><code>{last_name}</code><code>{email}</code>
+            <code>{city}</code><code>{brokerage}</code><code>{service}</code>
+            <code>{street}</code><code>{ai_hooks}</code><code>{open_house}</code>
+            <code>{last_sale}</code>
+          </div>
+          <div id="templatesContainer"></div>
+        </div>
+      </div>
 
-Best regards,
-Your Name
-          </pre>
+      <!-- ─────────────────── ANALYTICS ─────────────────── -->
+      <div id="analytics" class="tab">
+        <div class="page-header">
+          <h2>Analytics</h2>
+          <p>Link clicks and AI demo usage per campaign.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Link Click Analytics</div>
+          <div class="form-group">
+            <label class="field-label">Campaign</label>
+            <select id="campaignSelect">
+              <option value="">Select a campaign…</option>
+            </select>
+          </div>
+          <div class="table-wrap" id="clickAnalyticsWrap" style="margin-top:16px">
+            <table>
+              <thead><tr>
+                <th>Lead Email</th>
+                <th>URL Clicked</th>
+                <th>Time</th>
+                <th>AI Demo</th>
+              </tr></thead>
+              <tbody id="clickData">
+                <tr><td colspan="4" style="color:var(--text-mute);text-align:center;padding:24px">Select a campaign to view clicks</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─────────────────── SMTP ─────────────────── -->
+      <div id="smtp" class="tab">
+        <div class="page-header">
+          <h2>SMTP Accounts</h2>
+          <p>Add sending accounts. Each account is limited to 100 emails/day. Emails rotate automatically.</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Add Account</div>
+            <div class="form-group">
+              <label class="field-label">Email Address</label>
+              <input type="email" id="smtpEmail" placeholder="sender@yourdomain.com">
+            </div>
+            <div class="form-group">
+              <label class="field-label">Display Name</label>
+              <input type="text" id="smtpDisplayName" placeholder="John Smith">
+            </div>
+            <div class="form-group">
+              <label class="field-label">SMTP Host</label>
+              <input type="text" id="smtpHost" placeholder="smtp.gmail.com">
+            </div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label class="field-label">SMTP Port</label>
+                <input type="number" id="smtpPort" value="587">
+              </div>
+              <div class="form-group">
+                <label class="field-label">Username</label>
+                <input type="text" id="smtpUsername" placeholder="your@email.com">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="field-label">Password / App Password</label>
+              <input type="password" id="smtpPassword" placeholder="••••••••••••">
+            </div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label class="field-label">IMAP Host (optional)</label>
+                <input type="text" id="imapHost" placeholder="imap.gmail.com">
+              </div>
+              <div class="form-group">
+                <label class="field-label">IMAP Port</label>
+                <input type="number" id="imapPort" value="993">
+              </div>
+            </div>
+            <button class="btn btn-primary btn-full" onclick="addSmtpAccount()">
+              📡 Add SMTP Account
+            </button>
+            <div id="smtpStatus"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Configured Accounts</div>
+            <div id="smtpAccountsContainer">
+              <div class="skeleton" style="margin-bottom:8px"></div>
+              <div class="skeleton" style="width:65%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─────────────────── STATUS ─────────────────── -->
+      <div id="status" class="tab">
+        <div class="page-header">
+          <h2>Account Status</h2>
+          <p>Daily sending capacity across all SMTP accounts. Resets every midnight.</p>
+        </div>
+
+        <div class="stat-grid" id="statusStatGrid"></div>
+
+        <div class="card">
+          <div class="card-title">Per-Account Usage</div>
+          <div id="accountStatusContainer">
+            <div class="skeleton" style="margin-bottom:10px"></div>
+            <div class="skeleton" style="width:75%;margin-bottom:10px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─────────────────── RESPONDED ─────────────────── -->
+      <div id="responded" class="tab">
+        <div class="page-header">
+          <h2>Responded Leads</h2>
+          <p>Leads who have replied to your campaigns.</p>
         </div>
         <div class="card">
-          <h4>Follow-up Template</h4>
-          <pre>
-Subject: Following up
-
-Hi {name},
-
-Just following up on my previous email. Would you have time for a quick call this week to discuss {service}?
-
-Best regards,
-Your Name
-          </pre>
+          <div class="card-title">Responses</div>
+          <div id="respondedLeadsContainer">
+            <div class="skeleton" style="margin-bottom:8px"></div>
+            <div class="skeleton" style="width:55%"></div>
+          </div>
         </div>
-      `;
-    }
-    
-    async function loadSmtpAccounts() {
-      try {
-        const response = await fetch('/api/smtp-accounts');
-        if (response.ok) {
-          const data = await response.json();
-          smtpAccounts = data.accounts || [];
-          renderSmtpAccounts();
-        }
-      } catch (error) {
-        console.error('Error loading SMTP accounts:', error);
-      }
-    }
-    
-    function renderSmtpAccounts() {
-      const container = document.getElementById('smtpAccountsContainer');
-      if (smtpAccounts.length === 0) {
-        container.innerHTML = '<p>No SMTP accounts yet. Add your first account above.</p>';
-        return;
-      }
-      
-      let html = '<table><tr><th>Email</th><th>Display Name</th><th>SMTP Host</th><th>Actions</th></tr>';
-      smtpAccounts.forEach(account => {
-        html += `<tr>
-          <td>${account.email}</td>
-          <td>${account.display_name}</td>
-          <td>${account.smtp_host}:${account.smtp_port}</td>
-          <td>
-            <button onclick="testSmtpAccount(${account.id})">Test</button>
-            <button onclick="deleteSmtpAccount(${account.id})">Delete</button>
-          </td>
-        </tr>`;
-      });
-      html += '</table>';
-      container.innerHTML = html;
-    }
-    
-    async function addSmtpAccount() {
-      const email = document.getElementById('smtpEmail').value;
-      const displayName = document.getElementById('smtpDisplayName').value;
-      const host = document.getElementById('smtpHost').value;
-      const port = document.getElementById('smtpPort').value;
-      const username = document.getElementById('smtpUsername').value;
-      const password = document.getElementById('smtpPassword').value;
-      const imapHost = document.getElementById('imapHost').value;
-      const imapPort = document.getElementById('imapPort').value;
-      const status = document.getElementById('smtpStatus');
-      
-      if (!email || !host || !port || !username || !password) {
-        status.innerText = 'Please fill all required fields (email, host, port, username, password)';
-        return;
-      }
-      
-      // Validate port numbers
-      if (isNaN(port) || port <= 0 || port > 65535) {
-        status.innerText = 'SMTP port must be a valid port number (1-65535)';
-        return;
-      }
-      
-      if (imapPort && (isNaN(imapPort) || imapPort <= 0 || imapPort > 65535)) {
-        status.innerText = 'IMAP port must be a valid port number (1-65535)';
-        return;
-      }
-      
-      status.innerText = 'Adding account...';
-      
-      try {
-        const requestBody = {
-          email: email,
-          display_name: displayName || email,
-          smtp_host: host,
-          smtp_port: parseInt(port),
-          smtp_username: username,
-          smtp_password: password
-        };
-        
-        // Only add IMAP fields if provided
-        if (imapHost) requestBody.imap_host = imapHost;
-        if (imapPort) requestBody.imap_port = parseInt(imapPort);
-        
-        const response = await fetch('/api/smtp-accounts', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(requestBody)
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-          status.innerText = 'SMTP account added successfully!';
-          // Clear form
-          document.getElementById('smtpEmail').value = '';
-          document.getElementById('smtpDisplayName').value = '';
-          document.getElementById('smtpHost').value = '';
-          document.getElementById('smtpPort').value = '587';
-          document.getElementById('smtpUsername').value = '';
-          document.getElementById('smtpPassword').value = '';
-          document.getElementById('imapHost').value = '';
-          document.getElementById('imapPort').value = '993';
-          
-          loadSmtpAccounts();
-        } else {
-          status.innerText = `Error: ${data.error || 'Unknown error'} - ${data.detail || 'No details provided'}`;
-        }
-      } catch (error) {
-        status.innerText = 'Error adding SMTP account: ' + error.message;
-        console.error('SMTP account error:', error);
-      }
-    }
-    
-    async function testSmtpAccount(accountId) {
-      alert(`Testing SMTP account ${accountId} functionality would be implemented here`);
-      // In a real implementation, you'd call a test endpoint
-    }
-    
-    async function deleteSmtpAccount(accountId) {
-      if (confirm('Are you sure you want to delete this SMTP account?')) {
-        alert(`Deleting SMTP account ${accountId} functionality would be implemented here`);
-        // In a real implementation, you'd call a delete endpoint
-      }
-    }
-    
-    async function loadAccountStatus() {
-      try {
-        const response = await fetch('/api/account-status');
-        if (response.ok) {
-          const data = await response.json();
-          accountStatuses = data.accounts || [];
-          renderAccountStatus();
-        }
-      } catch (error) {
-        console.error('Error loading account status:', error);
-      }
-    }
-    
-    function renderAccountStatus() {
-      const container = document.getElementById('accountStatusContainer');
-      if (accountStatuses.length === 0) {
-        container.innerHTML = '<p>No accounts found.</p>';
-        return;
-      }
-      
-      let html = '<table><tr><th>Account</th><th>Sent Today</th><th>Remaining</th><th>Status</th></tr>';
-      accountStatuses.forEach(account => {
-        const statusClass = account.remaining_today > 10 ? 'status-good' : 
-                           account.remaining_today > 0 ? 'status-warning' : 'status-error';
-        
-        html += `<tr>
-          <td>${account.display_name} (${account.email})</td>
-          <td>${account.sent_today}</td>
-          <td>${account.remaining_today}</td>
-          <td><div class="account-status"><div class="status-indicator ${statusClass}"></div> ${account.remaining_today > 0 ? 'Active' : 'Limit Reached'}</div></td>
-        </tr>`;
-      });
-      html += '</table>';
-      container.innerHTML = html;
-    }
-    
-    async function loadRespondedLeads() {
-      try {
-        const response = await fetch('/api/responded-leads');
-        if (response.ok) {
-          const data = await response.json();
-          respondedLeads = data.responded_leads || [];
-          renderRespondedLeads();
-        }
-      } catch (error) {
-        console.error('Error loading responded leads:', error);
-      }
-    }
-    
-    function renderRespondedLeads() {
-      const container = document.getElementById('respondedLeadsContainer');
-      if (respondedLeads.length === 0) {
-        container.innerHTML = '<p>No leads have responded yet.</p>';
-        return;
-      }
-      
-      let html = '<table><tr><th>Email</th><th>Name</th><th>Responded At</th><th>Original List</th></tr>';
-      respondedLeads.forEach(lead => {
-        html += `<tr>
-          <td>${lead.email}</td>
-          <td>${lead.name} ${lead.last_name || ''}</td>
-          <td>${new Date(lead.responded_at).toLocaleString()}</td>
-          <td>${lead.list_name}</td>
-        </tr>`;
-      });
-      html += '</table>';
-      container.innerHTML = html;
-    }
-    
-    async function triggerWorkflow() {
-      const status = document.getElementById('workflowStatus');
-      status.innerHTML = '<div class="workflow-pending">Triggering workflow...</div>';
-      
-      try {
-        // This would need to be implemented with a backend endpoint that has a GitHub token
-        // For security reasons, we don't want to store GitHub tokens in frontend code
-        const response = await fetch('/api/trigger-workflow', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-          status.innerHTML = '<div class="workflow-success">Workflow triggered successfully!</div>';
-          // Reload workflow runs after a short delay
-          setTimeout(loadWorkflowRuns, 2000);
-        } else {
-          status.innerHTML = `<div class="workflow-failure">Error: ${data.error || 'Failed to trigger workflow'}</div>`;
-        }
-      } catch (error) {
-        status.innerHTML = `<div class="workflow-failure">Error: ${error.message}</div>`;
-        console.error('Workflow trigger error:', error);
-      }
-    }
-    
-    async function loadWorkflowRuns() {
-      const container = document.getElementById('workflowRunsContainer');
-      container.innerHTML = 'Loading workflow runs...';
-      
-      try {
-        // This would need to be implemented with a backend endpoint
-        const response = await fetch('/api/workflow-runs');
-        if (response.ok) {
-          const data = await response.json();
-          renderWorkflowRuns(data.runs || []);
-        } else {
-          container.innerHTML = 'Error loading workflow runs';
-        }
-      } catch (error) {
-        container.innerHTML = 'Error loading workflow runs';
-        console.error('Workflow runs error:', error);
-      }
-    }
-    
-    function renderWorkflowRuns(runs) {
-      const container = document.getElementById('workflowRunsContainer');
-      if (runs.length === 0) {
-        container.innerHTML = '<p>No workflow runs found.</p>';
-        return;
-      }
-      
-      let html = '<table><tr><th>Run ID</th><th>Status</th><th>Triggered At</th><th>Conclusion</th></tr>';
-      runs.forEach(run => {
-        const statusClass = run.status === 'completed' ? 'workflow-success' : 
-                           run.status === 'in_progress' ? 'workflow-pending' : 'workflow-failure';
-        
-        html += `<tr>
-          <td>${run.id}</td>
-          <td><span class="${statusClass}">${run.status}</span></td>
-          <td>${new Date(run.created_at).toLocaleString()}</td>
-          <td>${run.conclusion || 'N/A'}</td>
-        </tr>`;
-      });
-      html += '</table>';
-      container.innerHTML = html;
-    }
-  // Add this to the showTab function
+      </div>
+
+      <!-- ─────────────────── WORKFLOW ─────────────────── -->
+      <div id="workflow" class="tab">
+        <div class="page-header">
+          <h2>Workflow</h2>
+          <p>Trigger the GitHub Actions worker manually or view recent run history.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Manual Trigger</div>
+          <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">
+            The worker runs automatically every hour via cron. Use this to fire it immediately.
+          </p>
+          <button class="btn btn-primary" onclick="triggerWorkflow()">
+            ▶ Run Email Worker Now
+          </button>
+          <div id="workflowStatus"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Recent Runs</div>
+          <div id="workflowRunsContainer">
+            <div class="skeleton" style="margin-bottom:8px"></div>
+            <div class="skeleton" style="width:70%"></div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /layout -->
 
 
-// Add these new functions
-async function loadCampaignsForAnalytics() {
-  try {
-    const response = await fetch('/api/campaigns');
-    if (response.ok) {
-      const data = await response.json();
-      const select = document.getElementById('campaignSelect');
-      select.innerHTML = '<option value="">Select a campaign</option>';
-      
-      data.campaigns.forEach(campaign => {
-        const option = document.createElement('option');
-        option.value = campaign.id;
-        option.textContent = campaign.name;
-        select.appendChild(option);
-      });
-      
-      // Add event listener for campaign selection
-      select.addEventListener('change', function() {
-        const campaignId = this.value;
-        if (campaignId) {
-          loadCampaignClicks(campaignId);
-        } else {
-          document.getElementById('clickData').innerHTML = '';
-        }
-      });
-    }
-  } catch (error) {
-    console.error('Error loading campaigns for analytics:', error);
+<script>
+  /* ═══════════════════════════════════════════
+     STATE
+  ═══════════════════════════════════════════ */
+  let currentLists     = [];
+  let currentCampaigns = [];
+  let smtpAccounts     = [];
+  let accountStatuses  = [];
+  let respondedLeads   = [];
+
+  const tabTitles = {
+    import:    'Import Leads',
+    campaigns: 'Campaigns',
+    templates: 'Templates',
+    analytics: 'Analytics',
+    smtp:      'SMTP Accounts',
+    status:    'Account Status',
+    responded: 'Responded Leads',
+    workflow:  'Workflow'
+  };
+
+  /* ═══════════════════════════════════════════
+     TAB NAVIGATION
+  ═══════════════════════════════════════════ */
+  function showTab(name) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById(name).classList.add('active');
+    document.getElementById('nav-' + name).classList.add('active');
+    document.getElementById('topbarTitle').textContent = tabTitles[name] || name;
+
+    const loaders = {
+      import:    () => loadLists(),
+      campaigns: () => { loadLists(); loadCampaigns(); },
+      templates: () => loadTemplates(),
+      analytics: () => loadCampaignsForAnalytics(),
+      smtp:      () => loadSmtpAccounts(),
+      status:    () => loadAccountStatus(),
+      responded: () => loadRespondedLeads(),
+      workflow:  () => loadWorkflowRuns()
+    };
+    if (loaders[name]) loaders[name]();
   }
-}
 
-async function loadCampaignClicks(campaignId) {
-  try {
-    const response = await fetch(`/api/campaigns/${campaignId}/clicks`);
-    if (response.ok) {
-      const data = await response.json();
-      const tbody = document.getElementById('clickData');
-      tbody.innerHTML = '';
-      
-      if (data.clicks && data.clicks.length > 0) {
-        data.clicks.forEach(click => {
-          const row = document.createElement('tr');
-          row.innerHTML = `
-            <td>${click.leads?.email || 'Unknown'}</td>
-            <td>${click.url}</td>
-            <td>${new Date(click.clicked_at).toLocaleString()}</td>
-          `;
-          tbody.appendChild(row);
-        });
-      } else {
-        tbody.innerHTML = '<tr><td colspan="3">No clicks recorded for this campaign</td></tr>';
-      }
-    }
-  } catch (error) {
-    console.error('Error loading campaign clicks:', error);
+  /* ═══════════════════════════════════════════
+     HELPERS
+  ═══════════════════════════════════════════ */
+  function showAlert(id, msg, type = 'info') {
+    document.getElementById(id).innerHTML =
+      `<div class="alert alert-${type}">${msg}</div>`;
   }
-}
 
-// Add this function to check AI usage for a lead
-// Update this function in admin.html
-async function checkAIUsage(leadId) {
+  function fmt(iso) {
+    return new Date(iso).toLocaleString(undefined, {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+  }
+
+  /* ═══════════════════════════════════════════
+     IMPORT
+  ═══════════════════════════════════════════ */
+  async function loadLists() {
     try {
-        const response = await fetch(`/api/leads/${leadId}/ai-usage`);
-        const data = await response.json();
-        
-        if (data.ai_usage) {
-            return `<i class="fas fa-check" style="color: #64ffda;"></i> (${data.ai_usage.usage_count}x)`;
-        } else {
-            return '<i class="fas fa-times" style="color: #8892b0;"></i>';
-        }
-    } catch (error) {
-        console.error('Error checking AI usage:', error);
-        return '<i class="fas fa-question" style="color: #8892b0;"></i>';
-    }
-}
+      const r = await fetch('/api/leads/lists');
+      if (!r.ok) return;
+      const d = await r.json();
+      currentLists = d.lists || [];
+      renderLists();
+      populateListDropdown();
+    } catch(e) { console.error(e); }
+  }
 
-// Update the loadCampaignClicks function to include AI usage
-async function loadCampaignClicks(campaignId) {
-  try {
-    const response = await fetch(`/api/campaigns/${campaignId}/clicks`);
-    if (response.ok) {
-      const data = await response.json();
-      const tbody = document.getElementById('clickData');
-      tbody.innerHTML = '';
-      
-      if (data.clicks && data.clicks.length > 0) {
-        for (const click of data.clicks) {
-          const aiUsageHTML = await checkAIUsage(click.lead_id);
-          
-          const row = document.createElement('tr');
+  function renderLists() {
+    const c = document.getElementById('listsContainer');
+    if (!currentLists.length) {
+      c.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📋</div><p>No lists yet. Import a CSV to get started.</p></div>`;
+      return;
+    }
+    c.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>List Name</th><th>Leads</th><th></th></tr></thead>
+      <tbody>${currentLists.map(l => `
+        <tr>
+          <td>${l.list_name}</td>
+          <td><span class="badge badge-cyan">${l.lead_count}</span></td>
+          <td><button class="btn btn-ghost btn-sm" onclick="viewList('${l.list_name}')">View</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+  }
+
+  function populateListDropdown() {
+    const d = document.getElementById('campaignList');
+    d.innerHTML = '<option value="">Select a list…</option>';
+    currentLists.forEach(l => {
+      d.innerHTML += `<option value="${l.list_name}">${l.list_name} (${l.lead_count} leads)</option>`;
+    });
+  }
+
+  async function importLeads() {
+    const file     = document.getElementById('csvFile').files[0];
+    const listName = document.getElementById('listName').value.trim();
+    if (!file)     return showAlert('importStatus', 'Please select a CSV file.', 'error');
+    if (!listName) return showAlert('importStatus', 'Please enter a list name.', 'error');
+
+    showAlert('importStatus', 'Uploading & processing…', 'info');
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('list_name', listName);
+
+    try {
+      const r = await fetch('/api/leads/import', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (r.ok) {
+        showAlert('importStatus', `✓ Successfully imported <strong>${d.imported}</strong> leads into "${listName}".`, 'success');
+        document.getElementById('csvFile').value = '';
+        document.getElementById('listName').value = '';
+        loadLists();
+      } else {
+        showAlert('importStatus', `Error: ${d.error} — ${d.detail || ''}`, 'error');
+      }
+    } catch(e) {
+      showAlert('importStatus', 'Upload failed: ' + e.message, 'error');
+    }
+  }
+
+  function viewList(name) {
+    alert(`List: ${name}\nOpening list view is not implemented in this version.`);
+  }
+
+  /* ═══════════════════════════════════════════
+     CAMPAIGNS
+  ═══════════════════════════════════════════ */
+  let followupCount = 1;
+
+  function addFollowup() {
+    followupCount++;
+    const c = document.getElementById('followups');
+    const d = document.createElement('div');
+    d.className = 'followup-block';
+    d.innerHTML = `
+      <div class="followup-header">
+        <span class="followup-title">Follow-up #${followupCount}</span>
+        <button class="btn btn-danger btn-sm" onclick="this.closest('.followup-block').remove()">✕ Remove</button>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="field-label">Days After Previous</label>
+          <input class="followup-days" type="number" value="3" min="1">
+        </div>
+        <div class="form-group">
+          <label class="field-label">Subject — spintax ok</label>
+          <input class="followup-subject" type="text" placeholder="{{Following up|Checking in}}">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="field-label">Body — spintax ok</label>
+        <textarea class="followup-body" rows="4" placeholder="{{Just wanted to|Wanted to}} follow up..."></textarea>
+      </div>`;
+    c.appendChild(d);
+  }
+
+  async function createCampaign() {
+    const name    = document.getElementById('campaignName').value.trim();
+    const list    = document.getElementById('campaignList').value;
+    const subject = document.getElementById('campaignSubject').value.trim();
+    const body    = document.getElementById('campaignBody').value.trim();
+    const imm     = document.getElementById('sendImmediately').checked;
+
+    if (!name || !list || !subject || !body)
+      return showAlert('campaignStatus', 'Please fill in all required fields.', 'error');
+
+    const followups = [];
+    document.querySelectorAll('.followup-block').forEach(sec => {
+      const s = sec.querySelector('.followup-subject').value.trim();
+      const b = sec.querySelector('.followup-body').value.trim();
+      if (s && b) followups.push({
+        days_after: parseInt(sec.querySelector('.followup-days').value) || 2,
+        subject: s, body: b
+      });
+    });
+
+    showAlert('campaignStatus', 'Creating campaign…', 'info');
+
+    try {
+      const r = await fetch('/api/campaigns', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name, list_name: list, subject, body,
+                               follow_ups: followups, send_immediately: imm })
+      });
+      const d = await r.json();
+      if (r.ok) {
+        showAlert('campaignStatus',
+          `✓ Campaign "<strong>${name}</strong>" created!${imm ? ' Initial emails queued.' : ''}`,
+          'success');
+        document.getElementById('campaignName').value    = '';
+        document.getElementById('campaignSubject').value = '';
+        document.getElementById('campaignBody').value    = '';
+        document.getElementById('followups').innerHTML   = `
+          <div class="followup-block">
+            <div class="followup-header"><span class="followup-title">Follow-up #1</span></div>
+            <div class="grid-2">
+              <div class="form-group"><label class="field-label">Days After Previous</label><input class="followup-days" type="number" value="2" min="1"></div>
+              <div class="form-group"><label class="field-label">Subject</label><input class="followup-subject" type="text"></div>
+            </div>
+            <div class="form-group"><label class="field-label">Body</label><textarea class="followup-body" rows="4"></textarea></div>
+          </div>`;
+        followupCount = 1;
+        loadCampaigns();
+      } else {
+        showAlert('campaignStatus', `Error: ${d.error}`, 'error');
+      }
+    } catch(e) {
+      showAlert('campaignStatus', 'Request failed: ' + e.message, 'error');
+    }
+  }
+
+  async function loadCampaigns() {
+    try {
+      const r = await fetch('/api/campaigns');
+      if (!r.ok) return;
+      const d = await r.json();
+      currentCampaigns = d.campaigns || [];
+      renderCampaigns();
+    } catch(e) { console.error(e); }
+  }
+
+  function renderCampaigns() {
+    const c = document.getElementById('campaignsContainer');
+    if (!currentCampaigns.length) {
+      c.innerHTML = `<div class="empty-state"><div class="empty-state-icon">🚀</div><p>No campaigns yet.</p></div>`;
+      return;
+    }
+    c.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>List</th><th>Created</th><th>Actions</th></tr></thead>
+      <tbody>${currentCampaigns.map(c => `
+        <tr>
+          <td style="font-weight:500">${c.name}</td>
+          <td><span class="badge badge-cyan">${c.list_name}</span></td>
+          <td style="color:var(--text-dim)">${fmt(c.created_at)}</td>
+          <td style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick="queueFollowup(${c.id},1)">Send FU-1</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+  }
+
+  async function queueFollowup(campaignId, seq) {
+    try {
+      const r = await fetch('/api/queue-followup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ campaign_id: campaignId, sequence: seq })
+      });
+      const d = await r.json();
+      r.ok ? alert(`✓ Queued ${d.queued} follow-up emails`) : alert(`Error: ${d.error}`);
+    } catch(e) { alert('Error: ' + e.message); }
+  }
+
+  /* ═══════════════════════════════════════════
+     TEMPLATES
+  ═══════════════════════════════════════════ */
+  function loadTemplates() {
+    document.getElementById('templatesContainer').innerHTML = `
+      <div style="display:grid;gap:16px">
+        <div class="followup-block">
+          <div class="followup-header"><span class="followup-title">Initial Outreach — with spintax</span></div>
+          <div class="spintax-example">Subject: {{Quick question|Reaching out|Connecting}} for {name} at {brokerage}
+
+{{Hi|Hello|Hey}} {name},
+
+{{I noticed|I came across|I saw}} you're {{working at|with}} {brokerage} in {city}. {{I'd love to connect|I wanted to reach out}} and discuss how our {service} might {{benefit|help}} your clients.
+
+{{Looking forward to hearing from you|Hope to connect soon|Best regards}},</div>
+        </div>
+        <div class="followup-block">
+          <div class="followup-header"><span class="followup-title">Follow-up — with spintax</span></div>
+          <div class="spintax-example">Subject: {{Following up|Checking in|Quick follow-up}}
+
+{{Hi|Hey}} {name},
+
+{{Just wanted to|Wanted to|I'm|Simply}} follow up on my previous {{email|message|note}}. {{Would you have time|Do you have time}} for a quick call {{this week|soon}} to discuss {service}?
+
+{{Best|Thanks|Cheers}},</div>
+        </div>
+      </div>`;
+  }
+
+  /* ═══════════════════════════════════════════
+     ANALYTICS
+  ═══════════════════════════════════════════ */
+  async function loadCampaignsForAnalytics() {
+    try {
+      const r = await fetch('/api/campaigns');
+      if (!r.ok) return;
+      const d = await r.json();
+      const sel = document.getElementById('campaignSelect');
+      sel.innerHTML = '<option value="">Select a campaign…</option>';
+      (d.campaigns || []).forEach(c => {
+        sel.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+      });
+      sel.onchange = function() {
+        this.value ? loadCampaignClicks(this.value) :
+          (document.getElementById('clickData').innerHTML =
+            '<tr><td colspan="4" style="color:var(--text-mute);text-align:center;padding:24px">Select a campaign</td></tr>');
+      };
+    } catch(e) { console.error(e); }
+  }
+
+  async function checkAIUsage(leadId) {
+    try {
+      const r = await fetch(`/api/leads/${leadId}/ai-usage`);
+      const d = await r.json();
+      return d.ai_usage
+        ? `<span class="badge badge-green">✓ ${d.ai_usage.usage_count}x</span>`
+        : `<span class="badge" style="opacity:.4">—</span>`;
+    } catch(e) { return '—'; }
+  }
+
+  async function loadCampaignClicks(campaignId) {
+    const tb = document.getElementById('clickData');
+    tb.innerHTML = '<tr><td colspan="4" style="color:var(--text-mute);text-align:center;padding:20px">Loading…</td></tr>';
+    try {
+      const r = await fetch(`/api/campaigns/${campaignId}/clicks`);
+      if (!r.ok) throw new Error('API error');
+      const d = await r.json();
+      tb.innerHTML = '';
+      if (d.clicks && d.clicks.length) {
+        for (const click of d.clicks) {
+          const ai   = await checkAIUsage(click.lead_id);
+          const row  = document.createElement('tr');
+          const urlS = click.url.length > 50 ? click.url.slice(0,50)+'…' : click.url;
           row.innerHTML = `
-            <td>${click.leads?.email || 'Unknown'}</td>
-            <td>${click.url}</td>
-            <td>${new Date(click.clicked_at).toLocaleString()}</td>
-            <td>${aiUsageHTML}</td>
-          `;
-          tbody.appendChild(row);
+            <td style="font-family:var(--font-mono);font-size:12px">${click.leads?.email||'Unknown'}</td>
+            <td style="font-size:12px;color:var(--text-dim)" title="${click.url}">${urlS}</td>
+            <td style="font-size:12px;color:var(--text-dim)">${fmt(click.clicked_at)}</td>
+            <td>${ai}</td>`;
+          tb.appendChild(row);
         }
       } else {
-        tbody.innerHTML = '<tr><td colspan="4">No clicks recorded for this campaign</td></tr>';
+        tb.innerHTML = '<tr><td colspan="4" style="color:var(--text-mute);text-align:center;padding:24px">No clicks recorded for this campaign</td></tr>';
       }
+    } catch(e) {
+      tb.innerHTML = '<tr><td colspan="4" style="color:var(--pink);text-align:center;padding:20px">Error loading clicks</td></tr>';
     }
-  } catch (error) {
-    console.error('Error loading campaign clicks:', error);
   }
-}    
-    // Initial load
-    loadLists();
-  </script>
+
+  /* ═══════════════════════════════════════════
+     SMTP ACCOUNTS
+  ═══════════════════════════════════════════ */
+  async function loadSmtpAccounts() {
+    try {
+      const r = await fetch('/api/smtp-accounts');
+      if (!r.ok) return;
+      const d = await r.json();
+      smtpAccounts = d.accounts || [];
+      renderSmtpAccounts();
+    } catch(e) { console.error(e); }
+  }
+
+  function renderSmtpAccounts() {
+    const c = document.getElementById('smtpAccountsContainer');
+    if (!smtpAccounts.length) {
+      c.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📡</div><p>No accounts configured yet.</p></div>`;
+      return;
+    }
+    c.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>Email</th><th>Display Name</th><th>SMTP Host</th><th>Actions</th></tr></thead>
+      <tbody>${smtpAccounts.map(a => `
+        <tr>
+          <td style="font-family:var(--font-mono);font-size:12px">${a.email}</td>
+          <td>${a.display_name}</td>
+          <td style="color:var(--text-dim);font-size:12px">${a.smtp_host}:${a.smtp_port}</td>
+          <td style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick="testSmtpAccount(${a.id})">Test</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteSmtpAccount(${a.id})">Delete</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+  }
+
+  async function addSmtpAccount() {
+    const email    = document.getElementById('smtpEmail').value.trim();
+    const name     = document.getElementById('smtpDisplayName').value.trim();
+    const host     = document.getElementById('smtpHost').value.trim();
+    const port     = document.getElementById('smtpPort').value;
+    const user     = document.getElementById('smtpUsername').value.trim();
+    const pass     = document.getElementById('smtpPassword').value;
+    const iHost    = document.getElementById('imapHost').value.trim();
+    const iPort    = document.getElementById('imapPort').value;
+
+    if (!email || !host || !port || !user || !pass)
+      return showAlert('smtpStatus', 'Please fill all required fields.', 'error');
+
+    showAlert('smtpStatus', 'Connecting & saving…', 'info');
+
+    const body = { email, display_name: name || email,
+                   smtp_host: host, smtp_port: parseInt(port),
+                   smtp_username: user, smtp_password: pass };
+    if (iHost) { body.imap_host = iHost; body.imap_port = parseInt(iPort); }
+
+    try {
+      const r = await fetch('/api/smtp-accounts', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      });
+      const d = await r.json();
+      if (r.ok) {
+        showAlert('smtpStatus', `✓ Account <strong>${email}</strong> added successfully!`, 'success');
+        ['smtpEmail','smtpDisplayName','smtpHost','smtpUsername','smtpPassword','imapHost'].forEach(id => {
+          document.getElementById(id).value = '';
+        });
+        document.getElementById('smtpPort').value = '587';
+        document.getElementById('imapPort').value = '993';
+        loadSmtpAccounts();
+      } else {
+        showAlert('smtpStatus', `Error: ${d.error} — ${d.detail||''}`, 'error');
+      }
+    } catch(e) {
+      showAlert('smtpStatus', 'Request failed: ' + e.message, 'error');
+    }
+  }
+
+  function testSmtpAccount(id) {
+    alert(`Test SMTP ${id}: This would be implemented via a /api/smtp-accounts/${id}/test endpoint.`);
+  }
+
+  function deleteSmtpAccount(id) {
+    if (confirm('Delete this SMTP account?')) {
+      alert(`Delete SMTP ${id}: Implement DELETE /api/smtp-accounts/${id}.`);
+    }
+  }
+
+  /* ═══════════════════════════════════════════
+     ACCOUNT STATUS
+  ═══════════════════════════════════════════ */
+  async function loadAccountStatus() {
+    try {
+      const r = await fetch('/api/account-status');
+      if (!r.ok) return;
+      const d = await r.json();
+      accountStatuses = d.accounts || [];
+      renderAccountStatus();
+    } catch(e) { console.error(e); }
+  }
+
+  function renderAccountStatus() {
+    const c   = document.getElementById('accountStatusContainer');
+    const sg  = document.getElementById('statusStatGrid');
+
+    if (!accountStatuses.length) {
+      c.innerHTML  = `<div class="empty-state"><div class="empty-state-icon">⚡</div><p>No accounts found.</p></div>`;
+      sg.innerHTML = '';
+      return;
+    }
+
+    const totalSent      = accountStatuses.reduce((s, a) => s + a.sent_today, 0);
+    const totalRemaining = accountStatuses.reduce((s, a) => s + a.remaining_today, 0);
+    const activeAccounts = accountStatuses.filter(a => a.remaining_today > 0).length;
+
+    sg.innerHTML = `
+      <div class="stat-card"><div class="stat-label">Total Accounts</div><div class="stat-value">${accountStatuses.length}</div><div class="stat-sub">configured</div></div>
+      <div class="stat-card"><div class="stat-label">Active Today</div><div class="stat-value">${activeAccounts}</div><div class="stat-sub">with capacity</div></div>
+      <div class="stat-card"><div class="stat-label">Sent Today</div><div class="stat-value">${totalSent}</div><div class="stat-sub">emails out</div></div>
+      <div class="stat-card"><div class="stat-label">Remaining Today</div><div class="stat-value">${totalRemaining}</div><div class="stat-sub">capacity left</div></div>`;
+
+    c.innerHTML = accountStatuses.map(a => {
+      const pct  = (a.sent_today / 100) * 100;
+      const cls  = a.remaining_today > 10 ? 'good' : a.remaining_today > 0 ? 'warn' : 'danger';
+      const lbl  = a.remaining_today > 10 ? 'badge-green' : a.remaining_today > 0 ? 'badge-amber' : 'badge-red';
+      const txt  = a.remaining_today > 0 ? 'Active' : 'Exhausted';
+      return `<div class="account-card">
+        <div class="account-indicator ${cls}"></div>
+        <div class="account-info">
+          <div class="account-email">${a.email}</div>
+          <div class="account-name">${a.display_name}</div>
+          <div class="progress-bar"><div class="progress-fill ${cls}" style="width:${pct}%"></div></div>
+        </div>
+        <div class="account-bar-wrap" style="display:none"></div>
+        <div class="account-stats">
+          <div class="account-count">${a.sent_today}<span style="font-size:13px;color:var(--text-mute)">/100</span></div>
+          <div class="account-limit"><span class="badge ${lbl}">${txt}</span></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  /* ═══════════════════════════════════════════
+     RESPONDED LEADS
+  ═══════════════════════════════════════════ */
+  async function loadRespondedLeads() {
+    try {
+      const r = await fetch('/api/responded-leads');
+      if (!r.ok) return;
+      const d = await r.json();
+      respondedLeads = d.responded_leads || [];
+      renderRespondedLeads();
+    } catch(e) { console.error(e); }
+  }
+
+  function renderRespondedLeads() {
+    const c = document.getElementById('respondedLeadsContainer');
+    if (!respondedLeads.length) {
+      c.innerHTML = `<div class="empty-state"><div class="empty-state-icon">💬</div><p>No leads have responded yet.</p></div>`;
+      return;
+    }
+    c.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>Email</th><th>Name</th><th>Responded At</th><th>List</th></tr></thead>
+      <tbody>${respondedLeads.map(l => `
+        <tr>
+          <td style="font-family:var(--font-mono);font-size:12px">${l.email}</td>
+          <td>${l.name||''} ${l.last_name||''}</td>
+          <td style="color:var(--text-dim)">${fmt(l.responded_at)}</td>
+          <td><span class="badge badge-cyan">${l.list_name}</span></td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+  }
+
+  /* ═══════════════════════════════════════════
+     WORKFLOW
+  ═══════════════════════════════════════════ */
+  async function triggerWorkflow() {
+    showAlert('workflowStatus', 'Triggering workflow…', 'info');
+    try {
+      const r = await fetch('/api/trigger-workflow', { method: 'POST',
+        headers: {'Content-Type': 'application/json'} });
+      const d = await r.json();
+      r.ok
+        ? showAlert('workflowStatus', '✓ Workflow triggered! Check Recent Runs shortly.', 'success')
+        : showAlert('workflowStatus', `Error: ${d.error||'Failed'}`, 'error');
+      if (r.ok) setTimeout(loadWorkflowRuns, 2500);
+    } catch(e) {
+      showAlert('workflowStatus', 'Request failed: ' + e.message, 'error');
+    }
+  }
+
+  async function loadWorkflowRuns() {
+    const c = document.getElementById('workflowRunsContainer');
+    c.innerHTML = '<div class="skeleton" style="margin-bottom:8px"></div><div class="skeleton" style="width:70%"></div>';
+    try {
+      const r = await fetch('/api/workflow-runs');
+      if (!r.ok) { c.innerHTML = '<p style="color:var(--text-mute)">Could not load runs.</p>'; return; }
+      const d = await r.json();
+      renderWorkflowRuns(d.runs || []);
+    } catch(e) {
+      c.innerHTML = '<p style="color:var(--pink)">Error loading workflow runs.</p>';
+    }
+  }
+
+  function renderWorkflowRuns(runs) {
+    const c = document.getElementById('workflowRunsContainer');
+    if (!runs.length) {
+      c.innerHTML = `<div class="empty-state"><div class="empty-state-icon">⚙️</div><p>No runs found.</p></div>`;
+      return;
+    }
+    c.innerHTML = runs.map(r => {
+      const badge = r.status === 'completed'
+        ? (r.conclusion === 'success' ? 'badge-green' : 'badge-red')
+        : 'badge-amber';
+      const label = r.conclusion || r.status;
+      return `<div class="workflow-run">
+        <span class="run-id">#${r.id}</span>
+        <span class="run-time">${fmt(r.created_at)}</span>
+        <span class="badge ${badge}">${label}</span>
+      </div>`;
+    }).join('');
+  }
+
+  /* ═══════════════════════════════════════════
+     INIT
+  ═══════════════════════════════════════════ */
+  loadLists();
+</script>
 </body>
 </html>
