@@ -74,7 +74,7 @@ def render_email_template(template: str, lead_data: dict) -> str:
 
 # ── Gmail API helpers ─────────────────────────────────────────────────────────
 GOOGLE_TOKEN_URL     = "https://oauth2.googleapis.com/token"
-GOOGLE_GMAIL_SEND    = "https://gmail.googleapis.com/gmail/v1/users/me/send"
+GOOGLE_GMAIL_SEND    = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
 GOOGLE_CLIENT_ID     = os.environ.get('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
 
