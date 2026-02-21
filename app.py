@@ -1,4 +1,29 @@
-# app.py
+# app.py  –  Gmail API OAuth 2.0 edition
+#
+# REQUIRED ENV VARS (add these – others stay the same):
+#   GOOGLE_CLIENT_ID       from Google Cloud Console
+#   GOOGLE_CLIENT_SECRET   from Google Cloud Console
+#   GOOGLE_REDIRECT_URI    e.g. https://yourdomain.com/auth/gmail/callback
+#   FLASK_SECRET_KEY       any long random string (for session signing)
+#
+# REQUIRED pip packages (add to requirements.txt):
+#   requests  (already present)
+#   flask-session  (optional – standard flask sessions work fine here)
+#
+# SUPABASE TABLE NEEDED (run once):
+#   CREATE TABLE gmail_accounts (
+#     id                      SERIAL PRIMARY KEY,
+#     email                   TEXT UNIQUE NOT NULL,
+#     display_name            TEXT,
+#     encrypted_refresh_token TEXT NOT NULL,
+#     gmail_connected         BOOLEAN DEFAULT TRUE,
+#     created_at              TIMESTAMPTZ DEFAULT NOW()
+#   );
+#
+#   -- Also add gmail_account column to lead_campaign_accounts:
+#   ALTER TABLE lead_campaign_accounts
+#     ADD COLUMN IF NOT EXISTS gmail_account TEXT;
+
 import os
 import base64
 import json
@@ -9,30 +34,24 @@ import io
 import re
 import random
 import requests
-import smtplib
-import imaplib
-import ssl
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email.mime.text import MIMEText
+import urllib.parse
 from datetime import datetime, timedelta, timezone, date
-from flask import Flask, request, redirect, render_template, jsonify, current_app
+from flask import (Flask, request, redirect, render_template,
+                   jsonify, current_app, url_for)
 from flask_cors import CORS
 from dotenv import load_dotenv
 from supabase import create_client
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from email_validator import validate_email, EmailNotValidError
-from urllib.parse import urlencode
-import urllib.parse
 
 load_dotenv()
 
-# ---------- Supabase ----------
+# ── Supabase ──────────────────────────────────────────────────────────────────
 SUPABASE_URL = os.environ['SUPABASE_URL']
 SUPABASE_KEY = os.environ['SUPABASE_SERVICE_ROLE_KEY']
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase     = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ---------- Encryption ----------
+# ── Encryption ────────────────────────────────────────────────────────────────
 ENCRYPTION_KEY = bytes.fromhex(os.environ['ENCRYPTION_KEY'])
 
 def aesgcm_encrypt(plaintext: str) -> str:
@@ -45,82 +64,63 @@ def aesgcm_decrypt(b64text: str) -> str:
     data   = base64.b64decode(b64text)
     nonce  = data[:12]
     ct     = data[12:]
-    aesgcm = AESGCM(ENCRYPTION_KEY)
-    pt     = aesgcm.decrypt(nonce, ct, None)
-    return pt.decode('utf-8')
+    return AESGCM(ENCRYPTION_KEY).decrypt(nonce, ct, None).decode('utf-8')
 
 
-# ---------------------------------------------------------------------------
-# Spintax engine  –  syntax: {{option A|option B|option C}}
-# ---------------------------------------------------------------------------
+# ── Spintax ───────────────────────────────────────────────────────────────────
 def process_spintax(text: str) -> str:
-    """
-    Resolve all {{opt1|opt2|...}} groups in *text* by randomly picking
-    one option per group.  Nested groups are supported (inside-out resolution).
-
-    Example:
-        "{{Hi|Hello}} {name}, {{great to meet you|nice connecting}}!"
-        → "Hello John, great to meet you!"   (one possible permutation)
-    """
     pattern = re.compile(r'\{\{([^{}]+?)\}\}')
     while True:
-        match = pattern.search(text)
-        if not match:
+        m = pattern.search(text)
+        if not m:
             break
-        options = match.group(1).split('|')
-        chosen  = random.choice(options)
-        text    = text[:match.start()] + chosen + text[match.end():]
+        text = text[:m.start()] + random.choice(m.group(1).split('|')) + text[m.end():]
     return text
 
 
-# ---------------------------------------------------------------------------
-# Template rendering  (spintax FIRST → variable substitution → HTML escaping)
-# ---------------------------------------------------------------------------
+# ── Template rendering ────────────────────────────────────────────────────────
 def render_email_template(template: str, lead_data: dict) -> str:
-    """
-    1. Resolve {{spintax}} groups  → unique random permutation per call.
-    2. Replace {variable} tokens   → lead data.
-    3. Convert newlines to <br>    → HTML email safe.
-
-    Because process_spintax() is called per-lead, every recipient receives
-    a statistically unique version of the message even when sharing the same
-    campaign template.
-    """
-    # Step 1 – spintax
     rendered = process_spintax(template)
-
-    # Step 2 – lead variable substitution
     for key, value in lead_data.items():
         if value is None:
             value = ""
         rendered = rendered.replace("{" + str(key) + "}", str(value))
         rendered = rendered.replace("{" + str(key).replace('_', ' ') + "}", str(value))
-
-    # Step 3 – HTML whitespace
     rendered = rendered.replace('\n', '<br>')
     rendered = rendered.replace('  ', '&nbsp;&nbsp;')
-
     return rendered
 
 
-# ---------------------------------------------------------------------------
-# Flask app
-# ---------------------------------------------------------------------------
+# ── Gmail OAuth constants ─────────────────────────────────────────────────────
+GOOGLE_CLIENT_ID      = os.environ.get('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET  = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+GOOGLE_REDIRECT_URI   = os.environ.get('GOOGLE_REDIRECT_URI', '')
+GOOGLE_AUTH_URL       = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL      = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL   = "https://www.googleapis.com/oauth2/v3/userinfo"
+GOOGLE_REVOKE_URL     = "https://oauth2.googleapis.com/revoke"
+
+# Scopes: send mail + read profile email address
+GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+]
+
+
+# ── Flask app ─────────────────────────────────────────────────────────────────
 app = Flask(__name__, template_folder="templates")
 
 CORS(app, resources={
     r"/api/*": {
-        "origins": [
-            "replyzeai.com",
-            "replyzeai.com/demooff",
-        ],
+        "origins": ["replyzeai.com", "replyzeai.com/demooff"],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization", "Origin"]
     }
 })
 
 
-# ---------- Routes ----------
+# ── Pages ─────────────────────────────────────────────────────────────────────
 @app.route('/')
 def index():
     return render_template('admin.html')
@@ -130,74 +130,278 @@ def admin():
     return render_template('admin.html')
 
 
-# ---------- SMTP Accounts ----------
-@app.route('/api/smtp-accounts', methods=['GET'])
-def api_get_smtp_accounts():
+# ─────────────────────────────────────────────────────────────────────────────
+#  GMAIL OAUTH FLOW
+#
+#  Step 1 – /auth/gmail
+#    Admin clicks "Connect Gmail Account" → browser redirects to Google's
+#    consent screen requesting gmail.send + userinfo scopes.
+#
+#  Step 2 – Google redirects to /auth/gmail/callback
+#    We exchange the auth code for access_token + refresh_token, then call
+#    the userinfo endpoint to learn which Gmail address just connected.
+#    The refresh_token is AES-GCM encrypted and stored in gmail_accounts.
+#
+#  Step 3 – Done. Admin dashboard shows the account as connected.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Stateless OAuth state helpers ────────────────────────────────────────────
+# We sign the state token with HMAC-SHA256 using ENCRYPTION_KEY so we never
+# need Flask sessions.  This works across restarts, multiple workers, and any
+# reverse-proxy setup that might strip session cookies.
+import hmac
+import hashlib
+import time
+
+def _make_oauth_state() -> str:
+    """
+    Create a signed state token:  {nonce}.{timestamp}.{hmac}
+    Valid for 10 minutes.
+    """
+    nonce     = secrets.token_urlsafe(24)
+    ts        = str(int(time.time()))
+    payload   = f"{nonce}.{ts}"
+    sig       = hmac.new(ENCRYPTION_KEY[:32], payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+def _verify_oauth_state(state: str, max_age: int = 600) -> bool:
+    """
+    Verify the HMAC signature and that the token is < max_age seconds old.
+    Returns True only if both checks pass.
+    """
     try:
-        accounts = supabase.table("smtp_accounts").select("*").execute()
+        parts = state.rsplit('.', 1)          # split off the hex sig at the end
+        if len(parts) != 2:
+            return False
+        payload, sig = parts
+        expected = hmac.new(ENCRYPTION_KEY[:32], payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return False
+        # Extract timestamp (second segment of payload)
+        _, ts = payload.split('.', 1)
+        if int(time.time()) - int(ts) > max_age:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+@app.route('/auth/gmail')
+def auth_gmail():
+    """Kick off OAuth – redirect user to Google's consent screen."""
+    if not GOOGLE_CLIENT_ID:
+        return "GOOGLE_CLIENT_ID not configured", 500
+
+    # CSRF protection: HMAC-signed stateless token (no Flask session needed)
+    state = _make_oauth_state()
+
+    params = {
+        "client_id":     GOOGLE_CLIENT_ID,
+        "redirect_uri":  GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope":         " ".join(GMAIL_SCOPES),
+        "access_type":   "offline",   # REQUIRED to get refresh_token
+        "prompt":        "consent",   # REQUIRED – forces refresh_token even if
+                                      # user already authorised this app before
+        "state":         state,
+    }
+    auth_url = GOOGLE_AUTH_URL + "?" + urllib.parse.urlencode(params)
+    return redirect(auth_url)
+
+
+@app.route('/auth/gmail/callback')
+def auth_gmail_callback():
+    """Google redirects here after user consents."""
+    # ── CSRF check (stateless HMAC verify – no session required) ────────────
+    returned_state = request.args.get('state', '')
+    if not returned_state or not _verify_oauth_state(returned_state):
+        return "OAuth state invalid or expired. Please try connecting again.", 400
+
+    error = request.args.get('error')
+    if error:
+        return redirect(f"/admin?oauth_error={urllib.parse.quote(error)}")
+
+    code = request.args.get('code')
+    if not code:
+        return "Missing auth code from Google.", 400
+
+    # ── Exchange code for tokens ─────────────────────────────────────────────
+    token_resp = requests.post(GOOGLE_TOKEN_URL, data={
+        "code":          code,
+        "client_id":     GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "redirect_uri":  GOOGLE_REDIRECT_URI,
+        "grant_type":    "authorization_code",
+    }, timeout=15)
+
+    if token_resp.status_code != 200:
+        return (f"Token exchange failed: {token_resp.status_code} "
+                f"{token_resp.text}"), 400
+
+    tokens        = token_resp.json()
+    access_token  = tokens.get("access_token")
+    refresh_token = tokens.get("refresh_token")
+
+    if not refresh_token:
+        # This happens if the user already authorised the app without
+        # prompt=consent. The /auth/gmail route sets prompt=consent so this
+        # should never happen, but guard anyway.
+        return ("No refresh_token returned. "
+                "Please revoke app access in your Google account and try again."), 400
+
+    # ── Get the user's email address from Google ─────────────────────────────
+    info_resp = requests.get(
+        GOOGLE_USERINFO_URL,
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    if info_resp.status_code != 200:
+        return "Could not fetch user info from Google.", 400
+
+    info         = info_resp.json()
+    email        = info.get("email", "").lower()
+    display_name = info.get("name") or email
+
+    if not email:
+        return "Could not determine Gmail address.", 400
+
+    # ── Encrypt & store in Supabase ──────────────────────────────────────────
+    encrypted_rt = aesgcm_encrypt(refresh_token)
+
+    supabase.table("gmail_accounts").upsert({
+        "email":                   email,
+        "display_name":            display_name,
+        "encrypted_refresh_token": encrypted_rt,
+        "gmail_connected":         True,
+    }, on_conflict="email").execute()
+
+    return redirect("/admin?oauth_success=1")
+
+
+# ── Gmail accounts API ────────────────────────────────────────────────────────
+
+@app.route('/api/gmail-accounts', methods=['GET'])
+def api_get_gmail_accounts():
+    try:
+        accounts = supabase.table("gmail_accounts").select(
+            "id, email, display_name, gmail_connected, created_at"
+        ).order("created_at").execute()
         return jsonify({"ok": True, "accounts": accounts.data}), 200
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
 
-@app.route('/api/smtp-accounts', methods=['POST'])
-def api_add_smtp_account():
+@app.route('/api/gmail-accounts/<int:account_id>', methods=['DELETE'])
+def api_delete_gmail_account(account_id):
+    """
+    Disconnect & remove a Gmail account.
+    Also attempts to revoke the token from Google's side.
+    """
     try:
-        data = request.get_json(force=True)
+        acct = supabase.table("gmail_accounts") \
+            .select("encrypted_refresh_token, email") \
+            .eq("id", account_id) \
+            .single() \
+            .execute()
 
-        # Test connection before storing
+        if not acct.data:
+            return jsonify({"error": "Account not found"}), 404
+
+        # Try to revoke token at Google (best-effort)
         try:
-            smtp = smtplib.SMTP(data['smtp_host'], data['smtp_port'])
-            smtp.starttls()
-            smtp.login(data['smtp_username'], data['smtp_password'])
-            smtp.quit()
-        except Exception as e:
-            return jsonify({"error": "smtp_connection_failed", "detail": str(e)}), 400
+            rt = aesgcm_decrypt(acct.data["encrypted_refresh_token"])
+            requests.post(GOOGLE_REVOKE_URL, params={"token": rt}, timeout=10)
+        except Exception:
+            pass
 
-        encrypted_password = aesgcm_encrypt(data['smtp_password'])
-
-        account_data = {
-            "email":                    data['email'],
-            "display_name":             data.get('display_name', data['email']),
-            "smtp_host":                data['smtp_host'],
-            "smtp_port":                data['smtp_port'],
-            "smtp_username":            data['smtp_username'],
-            "encrypted_smtp_password":  encrypted_password,
-            "imap_host":                data.get('imap_host'),
-            "imap_port":                data.get('imap_port')
-        }
-
-        result = supabase.table("smtp_accounts").insert(account_data).execute()
-        if getattr(result, "error", None):
-            return jsonify({"error": "db_error", "detail": str(result.error)}), 500
-
-        return jsonify({"ok": True, "account": result.data[0]}), 200
+        supabase.table("gmail_accounts").delete().eq("id", account_id).execute()
+        return jsonify({"ok": True}), 200
 
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
 
-# ---------- Account Status ----------
+@app.route('/api/gmail-accounts/<int:account_id>/test', methods=['POST'])
+def api_test_gmail_account(account_id):
+    """Send a test email to the account itself to verify the token works."""
+    try:
+        acct = supabase.table("gmail_accounts") \
+            .select("*").eq("id", account_id).single().execute()
+
+        if not acct.data:
+            return jsonify({"error": "Account not found"}), 404
+
+        account = acct.data
+
+        # Get fresh access token
+        token_resp = requests.post(GOOGLE_TOKEN_URL, data={
+            "client_id":     GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "refresh_token": aesgcm_decrypt(account["encrypted_refresh_token"]),
+            "grant_type":    "refresh_token",
+        }, timeout=15)
+
+        if token_resp.status_code != 200:
+            return jsonify({
+                "error": "token_refresh_failed",
+                "detail": token_resp.text
+            }), 400
+
+        access_token = token_resp.json().get("access_token")
+
+        # Build a minimal test message
+        from email.mime.text import MIMEText
+        msg            = MIMEText("<p>ReplyzeAI Gmail API test — connection is working!</p>", "html", "utf-8")
+        msg["To"]      = account["email"]
+        msg["From"]    = f"{account['display_name']} <{account['email']}>"
+        msg["Subject"] = "[ReplyzeAI] Connection test"
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8").rstrip("=")
+
+        send_resp = requests.post(
+            "https://gmail.googleapis.com/gmail/v1/users/me/send",
+            headers={"Authorization": f"Bearer {access_token}",
+                     "Content-Type": "application/json"},
+            json={"raw": raw},
+            timeout=30,
+        )
+
+        if send_resp.status_code in (200, 201):
+            return jsonify({"ok": True, "message": "Test email sent to " + account["email"]}), 200
+
+        return jsonify({
+            "error": "send_failed",
+            "detail": send_resp.text
+        }), 400
+
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+# ── Account status ────────────────────────────────────────────────────────────
 @app.route('/api/account-status', methods=['GET'])
 def api_get_account_status():
     try:
-        today    = date.today().isoformat()
-        accounts = supabase.table("smtp_accounts").select("*").execute()
+        DAILY_LIMIT = int(os.environ.get('GMAIL_DAILY_LIMIT', 500))
+        today       = date.today().isoformat()
+        accounts    = supabase.table("gmail_accounts").select("*").execute()
 
         statuses = []
-        for account in accounts.data:
-            count_data = supabase.table("daily_email_counts") \
+        for acct in accounts.data:
+            cd = supabase.table("daily_email_counts") \
                 .select("count") \
-                .eq("email_account", account["email"]) \
+                .eq("email_account", acct["email"]) \
                 .eq("date", today) \
                 .execute()
 
-            count = count_data.data[0]["count"] if count_data.data else 0
+            count = cd.data[0]["count"] if cd.data else 0
             statuses.append({
-                "email":          account["email"],
-                "display_name":   account["display_name"],
+                "email":          acct["email"],
+                "display_name":   acct["display_name"],
+                "gmail_connected": acct["gmail_connected"],
                 "sent_today":     count,
-                "remaining_today": 100 - count
+                "remaining_today": DAILY_LIMIT - count,
+                "daily_limit":    DAILY_LIMIT,
             })
 
         return jsonify({"ok": True, "accounts": statuses}), 200
@@ -206,11 +410,12 @@ def api_get_account_status():
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
 
-# ---------- Campaigns ----------
+# ── Campaigns ─────────────────────────────────────────────────────────────────
 @app.route('/api/campaigns', methods=['GET'])
 def api_get_campaigns():
     try:
-        campaigns = supabase.table("campaigns").select("*").order("created_at", desc=True).execute()
+        campaigns = supabase.table("campaigns") \
+            .select("*").order("created_at", desc=True).execute()
         return jsonify({"ok": True, "campaigns": campaigns.data}), 200
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
@@ -221,61 +426,48 @@ def api_create_campaign():
     try:
         data = request.get_json(force=True)
 
-        campaign_data = {
+        result = supabase.table("campaigns").insert({
             "name":             data.get('name'),
             "subject":          data.get('subject'),
             "body":             data.get('body'),
             "list_name":        data.get('list_name'),
-            "send_immediately": data.get('send_immediately', False)
-        }
+            "send_immediately": data.get('send_immediately', False),
+        }).execute()
 
-        result = supabase.table("campaigns").insert(campaign_data).execute()
         if getattr(result, "error", None):
             return jsonify({"error": "db_error", "detail": str(result.error)}), 500
 
         campaign    = result.data[0]
         campaign_id = campaign['id']
 
-        # Insert follow-ups
-        follow_ups = data.get('follow_ups', [])
-        for i, follow_up in enumerate(follow_ups):
+        for i, fu in enumerate(data.get('follow_ups', [])):
             supabase.table("campaign_followups").insert({
                 "campaign_id":        campaign_id,
-                "subject":            follow_up.get('subject'),
-                "body":               follow_up.get('body'),
-                "days_after_previous": follow_up.get('days_after', 1),
-                "sequence":           i + 1
+                "subject":            fu.get('subject'),
+                "body":               fu.get('body'),
+                "days_after_previous": fu.get('days_after', 1),
+                "sequence":           i + 1,
             }).execute()
 
-        # Queue initial emails if send_immediately
         if data.get('send_immediately'):
             leads = supabase.table("leads") \
-                .select("*") \
-                .eq("list_name", data.get('list_name')) \
-                .execute()
+                .select("*").eq("list_name", data.get('list_name')).execute()
 
             if leads.data:
-                email_queue = []
+                queue = []
                 for lead in leads.data:
-                    # Each lead gets its own spintax resolution → unique permutation
-                    rendered_subject = render_email_template(data.get('subject', ''), lead)
-                    rendered_body    = render_email_template(data.get('body', ''),    lead)
-
-                    email_queue.append({
+                    queue.append({
                         "campaign_id":   campaign_id,
                         "lead_id":       lead['id'],
                         "lead_email":    lead['email'],
-                        "subject":       rendered_subject,
-                        "body":          rendered_body,
+                        "subject":       render_email_template(data.get('subject', ''), lead),
+                        "body":          render_email_template(data.get('body', ''),    lead),
                         "sequence":      0,
-                        "scheduled_for": datetime.now(timezone.utc).isoformat()
+                        "scheduled_for": datetime.now(timezone.utc).isoformat(),
                     })
 
-                CHUNK_SIZE = 100
-                for i in range(0, len(email_queue), CHUNK_SIZE):
-                    supabase.table("email_queue").insert(email_queue[i:i+CHUNK_SIZE]).execute()
-
-                print(f"Queued {len(email_queue)} emails (spintax resolved per-lead)")
+                for i in range(0, len(queue), 100):
+                    supabase.table("email_queue").insert(queue[i:i+100]).execute()
 
         return jsonify({"ok": True, "campaign": campaign}), 200
 
@@ -291,73 +483,64 @@ def api_queue_followup():
         sequence    = data.get('sequence')
 
         if not campaign_id or sequence is None:
-            return jsonify({"error": "campaign_id and sequence are required"}), 400
+            return jsonify({"error": "campaign_id and sequence required"}), 400
 
-        campaign  = supabase.table("campaigns").select("*").eq("id", campaign_id).single().execute()
+        campaign = supabase.table("campaigns") \
+            .select("*").eq("id", campaign_id).single().execute()
         follow_up = supabase.table("campaign_followups") \
-            .select("*") \
-            .eq("campaign_id", campaign_id) \
-            .eq("sequence", sequence) \
-            .single() \
-            .execute()
+            .select("*").eq("campaign_id", campaign_id).eq("sequence", sequence) \
+            .single().execute()
 
         if not campaign.data or not follow_up.data:
             return jsonify({"error": "Campaign or follow-up not found"}), 404
 
         leads = supabase.table("leads") \
-            .select("*") \
-            .eq("list_name", campaign.data['list_name']) \
-            .execute()
+            .select("*").eq("list_name", campaign.data['list_name']).execute()
 
         if not leads.data:
             return jsonify({"ok": True, "queued": 0}), 200
 
-        days_delay  = follow_up.data['days_after_previous']
-        send_date   = datetime.now(timezone.utc) + timedelta(days=days_delay)
-        email_queue = []
+        send_date = datetime.now(timezone.utc) + timedelta(
+            days=follow_up.data['days_after_previous'])
+        queue = []
 
         for lead in leads.data:
-            # Fresh spintax resolution per lead
-            rendered_subject = render_email_template(follow_up.data['subject'], lead)
-            rendered_body    = render_email_template(follow_up.data['body'],    lead)
-
-            email_queue.append({
+            queue.append({
                 "campaign_id":   campaign_id,
                 "lead_id":       lead['id'],
                 "lead_email":    lead['email'],
-                "subject":       rendered_subject,
-                "body":          rendered_body,
+                "subject":       render_email_template(follow_up.data['subject'], lead),
+                "body":          render_email_template(follow_up.data['body'],    lead),
                 "sequence":      sequence,
-                "scheduled_for": send_date.isoformat()
+                "scheduled_for": send_date.isoformat(),
             })
 
-        CHUNK_SIZE   = 100
-        total_queued = 0
-        for i in range(0, len(email_queue), CHUNK_SIZE):
-            chunk = email_queue[i:i+CHUNK_SIZE]
-            supabase.table("email_queue").insert(chunk).execute()
-            total_queued += len(chunk)
+        total = 0
+        for i in range(0, len(queue), 100):
+            supabase.table("email_queue").insert(queue[i:i+100]).execute()
+            total += len(queue[i:i+100])
 
-        return jsonify({"ok": True, "queued": total_queued}), 200
+        return jsonify({"ok": True, "queued": total}), 200
 
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
 
-# ---------- Leads ----------
+# ── Leads ─────────────────────────────────────────────────────────────────────
 @app.route('/api/leads/lists', methods=['GET'])
 def api_get_lead_lists():
     try:
         query = supabase.table("leads").select("list_name").execute()
-        list_counts = {}
+        counts = {}
         for lead in query.data:
-            name = lead.get('list_name', 'Unknown')
-            if name:
-                list_counts[name] = list_counts.get(name, 0) + 1
-        lists = [{"list_name": n, "lead_count": c} for n, c in list_counts.items()]
-        return jsonify({"ok": True, "lists": lists}), 200
+            n = lead.get('list_name', 'Unknown')
+            if n:
+                counts[n] = counts.get(n, 0) + 1
+        return jsonify({"ok": True,
+                        "lists": [{"list_name": n, "lead_count": c}
+                                  for n, c in counts.items()]}), 200
     except Exception as e:
-        current_app.logger.error("Error in api_get_lead_lists: %s", traceback.format_exc())
+        current_app.logger.error(traceback.format_exc())
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
 
@@ -377,15 +560,13 @@ def api_import_leads():
         decoded = None
         for enc in ('utf-8', 'latin-1', 'windows-1252', 'iso-8859-1'):
             try:
-                decoded = raw.decode(enc)
-                break
+                decoded = raw.decode(enc); break
             except UnicodeDecodeError:
                 continue
         if decoded is None:
             decoded = raw.decode('latin-1')
 
-        stream = io.StringIO(decoded)
-        reader = csv.DictReader(stream)
+        reader = csv.DictReader(io.StringIO(decoded))
 
         if not reader.fieldnames:
             return jsonify({"error": "CSV has no headers"}), 400
@@ -411,8 +592,7 @@ def api_import_leads():
             for k, v in row.items():
                 if not k:
                     continue
-                key = k.strip().lower()
-                key = HEADER_ALIASES.get(key, key)
+                key = HEADER_ALIASES.get(k.strip().lower(), k.strip().lower())
                 cleaned[key] = v.strip() if v else ""
 
             email = cleaned.get("email", "").lower()
@@ -423,36 +603,34 @@ def api_import_leads():
             except EmailNotValidError:
                 continue
 
-            custom_fields = {k: v for k, v in cleaned.items() if k not in STANDARD_FIELDS}
             leads_by_email[email] = {
-                "email":       email,
-                "name":        cleaned.get("name", ""),
-                "last_name":   cleaned.get("last name", ""),
-                "city":        cleaned.get("city", ""),
-                "brokerage":   cleaned.get("brokerage", ""),
-                "service":     cleaned.get("service", ""),
-                "street":      cleaned.get("street", ""),
-                "ai_hooks":    cleaned.get("ai hooks", ""),
-                "open_house":  cleaned.get("open house", ""),
-                "last_sale":   cleaned.get("last sale", ""),
-                "list_name":   list_name,
-                "custom_fields": custom_fields
+                "email":         email,
+                "name":          cleaned.get("name", ""),
+                "last_name":     cleaned.get("last name", ""),
+                "city":          cleaned.get("city", ""),
+                "brokerage":     cleaned.get("brokerage", ""),
+                "service":       cleaned.get("service", ""),
+                "street":        cleaned.get("street", ""),
+                "ai_hooks":      cleaned.get("ai hooks", ""),
+                "open_house":    cleaned.get("open house", ""),
+                "last_sale":     cleaned.get("last sale", ""),
+                "list_name":     list_name,
+                "custom_fields": {k: v for k, v in cleaned.items()
+                                  if k not in STANDARD_FIELDS},
             }
 
         leads = list(leads_by_email.values())
-        if leads:
-            CHUNK_SIZE = 100
-            for i in range(0, len(leads), CHUNK_SIZE):
-                result = supabase.table("leads") \
-                    .upsert(leads[i:i+CHUNK_SIZE], on_conflict="email") \
-                    .execute()
-                if getattr(result, "error", None):
-                    return jsonify({"error": "db_error", "detail": str(result.error)}), 500
+        for i in range(0, len(leads), 100):
+            r = supabase.table("leads").upsert(
+                leads[i:i+100], on_conflict="email").execute()
+            if getattr(r, "error", None):
+                return jsonify({"error": "db_error", "detail": str(r.error)}), 500
 
-        return jsonify({"ok": True, "imported": len(leads), "sample": leads[0] if leads else {}}), 200
+        return jsonify({"ok": True, "imported": len(leads),
+                        "sample": leads[0] if leads else {}}), 200
 
     except Exception as e:
-        current_app.logger.error("Lead import failed:\n%s", traceback.format_exc())
+        current_app.logger.error(traceback.format_exc())
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
 
@@ -477,36 +655,32 @@ def api_get_lead_campaign_accounts():
 @app.route('/api/responded-leads', methods=['GET'])
 def api_get_responded_leads():
     try:
-        leads = supabase.table("responded_leads").select("*").order("responded_at", desc=True).execute()
+        leads = supabase.table("responded_leads") \
+            .select("*").order("responded_at", desc=True).execute()
         return jsonify({"ok": True, "responded_leads": leads.data}), 200
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
 
-# ---------- Click Tracking ----------
+# ── Click tracking ────────────────────────────────────────────────────────────
 @app.route('/track/<lead_id>/<campaign_id>')
 def track_click(lead_id, campaign_id):
     try:
         url = request.args.get('url')
         if not url:
             return "URL parameter missing", 400
-        original_url    = urllib.parse.unquote(url)
-        email_queue_id  = request.args.get('eqid', None)
 
-        try:
-            lead_id_int     = int(lead_id)
-        except (ValueError, TypeError):
-            lead_id_int     = None
-        try:
-            campaign_id_int = int(campaign_id)
-        except (ValueError, TypeError):
-            campaign_id_int = None
+        original_url   = urllib.parse.unquote(url)
+        email_queue_id = request.args.get('eqid')
+
+        try:   lid = int(lead_id)
+        except: lid = None
+        try:   cid = int(campaign_id)
+        except: cid = None
 
         supabase.table("link_clicks").insert({
-            "lead_id":        lead_id_int,
-            "campaign_id":    campaign_id_int,
-            "url":            original_url,
-            "email_queue_id": email_queue_id
+            "lead_id": lid, "campaign_id": cid,
+            "url": original_url, "email_queue_id": email_queue_id,
         }).execute()
 
         demo_url     = "https://replyzeai.com/goods/templates/demooff"
@@ -526,8 +700,7 @@ def api_get_campaign_clicks(campaign_id):
         clicks = supabase.table("link_clicks") \
             .select("*, leads(email, name)") \
             .eq("campaign_id", campaign_id) \
-            .order("clicked_at", desc=True) \
-            .execute()
+            .order("clicked_at", desc=True).execute()
         return jsonify({"ok": True, "clicks": clicks.data}), 200
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
@@ -539,8 +712,7 @@ def api_get_lead_clicks(lead_id):
         clicks = supabase.table("link_clicks") \
             .select("*, campaigns(name)") \
             .eq("lead_id", lead_id) \
-            .order("clicked_at", desc=True) \
-            .execute()
+            .order("clicked_at", desc=True).execute()
         return jsonify({"ok": True, "clicks": clicks.data}), 200
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
@@ -549,19 +721,15 @@ def api_get_lead_clicks(lead_id):
 @app.route('/api/track', methods=['GET'])
 def api_track_click():
     try:
-        lead_id        = request.args.get('lead_id')
-        campaign_id    = request.args.get('campaign_id')
-        url            = request.args.get('url')
-        email_queue_id = request.args.get('eqid', None)
-
-        if not all([lead_id, campaign_id, url]):
+        lead_id = request.args.get('lead_id')
+        cid     = request.args.get('campaign_id')
+        url     = request.args.get('url')
+        eqid    = request.args.get('eqid')
+        if not all([lead_id, cid, url]):
             return "Missing parameters", 400
-
         supabase.table("link_clicks").insert({
-            "lead_id":        lead_id,
-            "campaign_id":    campaign_id,
-            "url":            url,
-            "email_queue_id": email_queue_id
+            "lead_id": lead_id, "campaign_id": cid,
+            "url": url, "email_queue_id": eqid,
         }).execute()
         return redirect(url)
     except Exception as e:
@@ -569,7 +737,7 @@ def api_track_click():
         return "Error tracking click", 500
 
 
-# ---------- Lead details ----------
+# ── Lead details ──────────────────────────────────────────────────────────────
 @app.route('/api/leads/<int:lead_id>', methods=['GET'])
 def api_get_lead(lead_id):
     try:
@@ -585,16 +753,14 @@ def api_get_lead_ai_usage(lead_id):
         lead = supabase.table("leads").select("email").eq("id", lead_id).single().execute()
         if not lead.data:
             return jsonify({"ok": True, "ai_usage": None}), 200
-        ai_usage = supabase.table("ai_demo_usage") \
-            .select("*") \
-            .eq("email", lead.data['email']) \
-            .execute()
-        return jsonify({"ok": True, "ai_usage": ai_usage.data[0] if ai_usage.data else None}), 200
+        ai = supabase.table("ai_demo_usage") \
+            .select("*").eq("email", lead.data['email']).execute()
+        return jsonify({"ok": True, "ai_usage": ai.data[0] if ai.data else None}), 200
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
 
-# ---------- AI demo ----------
+# ── AI demo ───────────────────────────────────────────────────────────────────
 @app.route('/demo')
 def demo():
     return render_template('demo.html',
@@ -605,17 +771,17 @@ def demo():
 @app.route('/api/generate-reply-prompt', methods=['OPTIONS', 'POST'])
 def generate_reply_prompt():
     if request.method == "OPTIONS":
-        response = jsonify({"status": "ok"})
-        response.headers.add("Access-Control-Allow-Origin", "https://replyzeai.com")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
-        return response
+        resp = jsonify({"status": "ok"})
+        resp.headers.add("Access-Control-Allow-Origin", "https://replyzeai.com")
+        resp.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        return resp
 
     data   = request.get_json(force=True)
     prompt = data.get("prompt", "").strip()
     if not prompt:
         return jsonify({"error": "Missing prompt"}), 400
 
-    enhanced_prompt = f"""
+    enhanced = f"""
 Generate a professional real estate agent reply to the following email, and then generate three follow-up emails.
 Format your response exactly as follows:
 
@@ -634,63 +800,54 @@ Format your response exactly as follows:
 Email to respond to:
 {prompt}
 """
-
     try:
         GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
         if not GROQ_API_KEY:
             return jsonify({"error": "Groq API key not configured"}), 500
 
-        response = requests.post(
+        r = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                     "Content-Type": "application/json"},
             json={
-                "model":       "llama-3.1-8b-instant",
+                "model": "llama-3.1-8b-instant",
                 "messages": [
-                    {"role": "system", "content": "You are a professional real estate agent. Generate concise, professional responses that help convert leads into appointments."},
-                    {"role": "user",   "content": enhanced_prompt}
+                    {"role": "system", "content": "You are a professional real estate agent."},
+                    {"role": "user",   "content": enhanced}
                 ],
-                "temperature": 0.7,
-                "max_tokens":  1024,
-                "top_p":       0.8
-            },
-            timeout=30
+                "temperature": 0.7, "max_tokens": 1024, "top_p": 0.8
+            }, timeout=30
         )
+        if r.status_code != 200:
+            return jsonify({"error": f"Groq error: {r.status_code}"}), 500
 
-        if response.status_code != 200:
-            return jsonify({"error": f"Groq API error: {response.status_code}"}), 500
-
-        result        = response.json()
-        full_response = result["choices"][0]["message"]["content"].strip()
-        sections      = {}
-        current_section = None
-        for line in full_response.split('\n'):
+        full     = r.json()["choices"][0]["message"]["content"].strip()
+        sections = {}
+        cur      = None
+        for line in full.split('\n'):
             line = line.strip()
             for key, label in [("=== REPLY ===", "reply"),
-                                ("=== FOLLOW UP 1 ===", "follow_up_1"),
-                                ("=== FOLLOW UP 2 ===", "follow_up_2"),
-                                ("=== FOLLOW UP 3 ===", "follow_up_3")]:
+                                ("=== FOLLOW UP 1 ===", "fu1"),
+                                ("=== FOLLOW UP 2 ===", "fu2"),
+                                ("=== FOLLOW UP 3 ===", "fu3")]:
                 if line == key:
-                    current_section = label
-                    sections[current_section] = []
-                    break
+                    cur = label; sections[cur] = []; break
             else:
-                if current_section and line:
-                    sections[current_section].append(line)
+                if cur and line:
+                    sections[cur].append(line)
 
-        reply     = ' '.join(sections.get('reply', [])).strip()
-        follow_ups = [
-            ' '.join(sections.get('follow_up_1', [])).strip(),
-            ' '.join(sections.get('follow_up_2', [])).strip(),
-            ' '.join(sections.get('follow_up_3', [])).strip()
-        ]
-        follow_ups = [fu for fu in follow_ups if fu]
-
-        resp = jsonify({"reply": reply, "follow_ups": follow_ups})
+        resp = jsonify({
+            "reply": ' '.join(sections.get('reply', [])).strip(),
+            "follow_ups": [f for f in [
+                ' '.join(sections.get('fu1', [])).strip(),
+                ' '.join(sections.get('fu2', [])).strip(),
+                ' '.join(sections.get('fu3', [])).strip(),
+            ] if f]
+        })
         resp.headers.add("Access-Control-Allow-Origin", "https://replyzeai.com")
         return resp
 
     except Exception as e:
-        print(f"Groq error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -720,40 +877,34 @@ def api_record_ai_usage():
             }).eq("email", email).execute()
         else:
             supabase.table("ai_demo_usage").insert({
-                "lead_id":      lead_id,
-                "email":        email,
-                "usage_count":  1,
+                "lead_id": lead_id, "email": email, "usage_count": 1,
                 "first_used_at": datetime.now(timezone.utc).isoformat(),
-                "last_used_at":  datetime.now(timezone.utc).isoformat()
+                "last_used_at":  datetime.now(timezone.utc).isoformat(),
             }).execute()
 
         return jsonify({"ok": True}), 200
 
     except Exception as e:
-        print(f"AI usage record error: {e}")
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
 
-# ---------- Workflow ----------
+# ── GitHub Actions workflow ───────────────────────────────────────────────────
 @app.route('/api/trigger-workflow', methods=['POST'])
 def api_trigger_workflow():
     try:
-        GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
-        GITHUB_REPO  = os.environ.get('GITHUB_REPO')  # "owner/repo"
-        if not GITHUB_TOKEN or not GITHUB_REPO:
+        TOKEN = os.environ.get('GITHUB_TOKEN')
+        REPO  = os.environ.get('GITHUB_REPO')
+        if not TOKEN or not REPO:
             return jsonify({"error": "GitHub credentials not configured"}), 500
 
-        response = requests.post(
-            f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/process.yml/dispatches",
-            headers={
-                "Authorization": f"Bearer {GITHUB_TOKEN}",
-                "Accept":        "application/vnd.github.v3+json"
-            },
+        r = requests.post(
+            f"https://api.github.com/repos/{REPO}/actions/workflows/process.yml/dispatches",
+            headers={"Authorization": f"Bearer {TOKEN}",
+                     "Accept": "application/vnd.github.v3+json"},
             json={"ref": "main"}
         )
-        if response.status_code == 204:
-            return jsonify({"ok": True}), 200
-        return jsonify({"error": f"GitHub API error: {response.status_code}"}), 500
+        return jsonify({"ok": True}) if r.status_code == 204 \
+            else jsonify({"error": f"GitHub API error: {r.status_code}"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -761,21 +912,17 @@ def api_trigger_workflow():
 @app.route('/api/workflow-runs', methods=['GET'])
 def api_get_workflow_runs():
     try:
-        GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
-        GITHUB_REPO  = os.environ.get('GITHUB_REPO')
-        if not GITHUB_TOKEN or not GITHUB_REPO:
+        TOKEN = os.environ.get('GITHUB_TOKEN')
+        REPO  = os.environ.get('GITHUB_REPO')
+        if not TOKEN or not REPO:
             return jsonify({"error": "GitHub credentials not configured"}), 500
 
-        response = requests.get(
-            f"https://api.github.com/repos/{GITHUB_REPO}/actions/runs?per_page=10",
-            headers={
-                "Authorization": f"Bearer {GITHUB_TOKEN}",
-                "Accept":        "application/vnd.github.v3+json"
-            }
+        r    = requests.get(
+            f"https://api.github.com/repos/{REPO}/actions/runs?per_page=10",
+            headers={"Authorization": f"Bearer {TOKEN}",
+                     "Accept": "application/vnd.github.v3+json"}
         )
-        data = response.json()
-        runs = data.get("workflow_runs", [])
-        return jsonify({"ok": True, "runs": runs}), 200
+        return jsonify({"ok": True, "runs": r.json().get("workflow_runs", [])}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
