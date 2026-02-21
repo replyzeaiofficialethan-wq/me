@@ -359,7 +359,7 @@ def api_test_gmail_account(account_id):
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8").rstrip("=")
 
         send_resp = requests.post(
-            "https://gmail.googleapis.com/gmail/v1/users/me/send",
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
             headers={"Authorization": f"Bearer {access_token}",
                      "Content-Type": "application/json"},
             json={"raw": raw},
