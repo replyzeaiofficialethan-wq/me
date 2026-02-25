@@ -426,12 +426,17 @@ def api_create_campaign():
     try:
         data = request.get_json(force=True)
 
+        send_delay   = int(data.get('send_delay_seconds',  0))
+        send_jitter  = int(data.get('send_jitter_seconds', 0))
+
         result = supabase.table("campaigns").insert({
-            "name":             data.get('name'),
-            "subject":          data.get('subject'),
-            "body":             data.get('body'),
-            "list_name":        data.get('list_name'),
-            "send_immediately": data.get('send_immediately', False),
+            "name":                 data.get('name'),
+            "subject":              data.get('subject'),
+            "body":                 data.get('body'),
+            "list_name":            data.get('list_name'),
+            "send_immediately":     data.get('send_immediately', False),
+            "send_delay_seconds":   send_delay,
+            "send_jitter_seconds":  send_jitter,
         }).execute()
 
         if getattr(result, "error", None):
@@ -454,8 +459,17 @@ def api_create_campaign():
                 .select("*").eq("list_name", data.get('list_name')).execute()
 
             if leads.data:
-                queue = []
+                import random as _random
+                queue      = []
+                offset_sec = 0  # cumulative send-time offset for throttling
+
                 for lead in leads.data:
+                    # Stagger each email by delay ± jitter seconds
+                    jitter_val  = _random.randint(-send_jitter, send_jitter) if send_jitter > 0 else 0
+                    step        = max(0, send_delay + jitter_val)
+                    send_time   = datetime.now(timezone.utc) + timedelta(seconds=offset_sec)
+                    offset_sec += step  # next email pushed further into the future
+
                     queue.append({
                         "campaign_id":   campaign_id,
                         "lead_id":       lead['id'],
@@ -463,7 +477,7 @@ def api_create_campaign():
                         "subject":       render_email_template(data.get('subject', ''), lead),
                         "body":          render_email_template(data.get('body', ''),    lead),
                         "sequence":      0,
-                        "scheduled_for": datetime.now(timezone.utc).isoformat(),
+                        "scheduled_for": send_time.isoformat(),
                     })
 
                 for i in range(0, len(queue), 100):
