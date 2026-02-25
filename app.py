@@ -102,10 +102,12 @@ GOOGLE_REVOKE_URL     = "https://oauth2.googleapis.com/revoke"
 
 # Scopes: send mail + read profile email address
 GMAIL_SCOPES = [
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile",
-]
+         "https://www.googleapis.com/auth/gmail.send",
+         "https://www.googleapis.com/auth/gmail.readonly",   # ← ADD THIS
+         "https://www.googleapis.com/auth/userinfo.email",
+         "https://www.googleapis.com/auth/userinfo.profile",
+     ]
+
 
 
 # ── Flask app ─────────────────────────────────────────────────────────────────
@@ -940,6 +942,287 @@ def api_get_workflow_runs():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# reply_routes.py
+#
+# INSTRUCTIONS: Copy everything below (from the first @app.route to the end)
+# and paste it into app.py, just BEFORE the final:
+#
+#     if __name__ == "__main__":
+#         app.run(...)
+#
+# Also update GMAIL_SCOPES near the top of app.py to add the read scope:
+#
+#     GMAIL_SCOPES = [
+#         "https://www.googleapis.com/auth/gmail.send",
+#         "https://www.googleapis.com/auth/gmail.readonly",   # ← ADD THIS
+#         "https://www.googleapis.com/auth/userinfo.email",
+#         "https://www.googleapis.com/auth/userinfo.profile",
+#     ]
+#
+# After pasting, re-auth your Gmail accounts via /auth/gmail so the new scope
+# is granted.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PILOTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/pilots', methods=['GET'])
+def api_get_pilots():
+    try:
+        status = request.args.get('status')
+        q = supabase.table("pilots").select("*").order("created_at", desc=True)
+        if status:
+            q = q.eq("status", status)
+        pilots = q.execute()
+        return jsonify({"ok": True, "pilots": pilots.data}), 200
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+@app.route('/api/pilots/<int:pilot_id>', methods=['GET'])
+def api_get_pilot(pilot_id):
+    try:
+        pilot = supabase.table("pilots").select("*").eq("id", pilot_id).single().execute()
+        if not pilot.data:
+            return jsonify({"error": "not_found"}), 404
+        return jsonify({"ok": True, "pilot": pilot.data}), 200
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+@app.route('/api/pilots/<int:pilot_id>', methods=['PATCH'])
+def api_update_pilot(pilot_id):
+    """Update pilot status, inbound_count, notes, etc."""
+    try:
+        data = request.get_json(force=True)
+        allowed = {
+            "status", "inbound_count", "qualified_count", "bookings_confirmed",
+            "address", "listing_url", "ops_notes"
+        }
+        update = {k: v for k, v in data.items() if k in allowed}
+        if not update:
+            return jsonify({"error": "no_valid_fields"}), 400
+        update["updated_at"] = datetime.now(timezone.utc).isoformat()
+        supabase.table("pilots").update(update).eq("id", pilot_id).execute()
+
+        # Log status transitions
+        if "status" in update:
+            supabase.table("reply_audit_log").insert({
+                "event_type": "PILOT_STATUS_CHANGED",
+                "data": {"pilot_id": pilot_id, "new_status": update["status"]},
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+@app.route('/api/pilots/stats', methods=['GET'])
+def api_pilots_stats():
+    """Summary counts for the dashboard metrics panel."""
+    try:
+        all_pilots = supabase.table("pilots").select("status").execute()
+        counts: dict = {}
+        for p in all_pilots.data:
+            s = p.get("status", "unknown")
+            counts[s] = counts.get(s, 0) + 1
+
+        total  = len(all_pilots.data)
+        active = counts.get("active", 0) + counts.get("running", 0)
+
+        # Replied count from processed_replies (excluding NOT_A_LEAD, DO_NOT_CONTACT)
+        pr = supabase.table("processed_replies") \
+            .select("intent") \
+            .neq("intent", "NOT_A_LEAD") \
+            .neq("intent", "DO_NOT_CONTACT") \
+            .execute()
+        intent_counts: dict = {}
+        for row in pr.data:
+            i = row.get("intent", "UNKNOWN")
+            intent_counts[i] = intent_counts.get(i, 0) + 1
+
+        unsub_count = (
+            supabase.table("leads").select("id", count="exact")
+                .eq("do_not_contact", True).execute().count or 0
+        )
+
+        return jsonify({
+            "ok": True,
+            "stats": {
+                "pilots_total":       total,
+                "pilots_active":      active,
+                "pilots_by_status":   counts,
+                "replies_by_intent":  intent_counts,
+                "unsubscribes":       unsub_count,
+                "replies_total":      len(pr.data),
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  OPS TICKETS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/ops-tickets', methods=['GET'])
+def api_get_ops_tickets():
+    try:
+        status = request.args.get('status', 'open')
+        tickets = supabase.table("ops_tickets") \
+            .select("*") \
+            .eq("status", status) \
+            .order("created_at", desc=True) \
+            .execute()
+        return jsonify({"ok": True, "tickets": tickets.data}), 200
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+@app.route('/api/ops-tickets/<int:ticket_id>/resolve', methods=['POST'])
+def api_resolve_ticket(ticket_id):
+    try:
+        data = request.get_json(force=True)
+        supabase.table("ops_tickets").update({
+            "status":      "resolved",
+            "resolved_by": data.get("resolved_by", "admin"),
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", ticket_id).execute()
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+@app.route('/api/ops-tickets/<int:ticket_id>/spam', methods=['POST'])
+def api_spam_ticket(ticket_id):
+    try:
+        supabase.table("ops_tickets").update({"status": "spam"}) \
+            .eq("id", ticket_id).execute()
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  AUDIT LOG
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/reply-audit', methods=['GET'])
+def api_get_reply_audit():
+    try:
+        limit      = int(request.args.get('limit', 100))
+        event_type = request.args.get('event_type')
+        q = supabase.table("reply_audit_log").select("*") \
+                .order("created_at", desc=True).limit(limit)
+        if event_type:
+            q = q.eq("event_type", event_type)
+        logs = q.execute()
+        return jsonify({"ok": True, "logs": logs.data}), 200
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PROCESSED REPLIES  (for the "Inbound Replies" table in admin UI)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/processed-replies', methods=['GET'])
+def api_get_processed_replies():
+    try:
+        limit  = int(request.args.get('limit', 50))
+        intent = request.args.get('intent')
+        q = supabase.table("processed_replies").select("*") \
+                .neq("intent", "NOT_A_LEAD") \
+                .neq("intent", "DO_NOT_CONTACT") \
+                .order("processed_at", desc=True) \
+                .limit(limit)
+        if intent:
+            q = q.eq("intent", intent)
+        replies = q.execute()
+        return jsonify({"ok": True, "replies": replies.data}), 200
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MANUAL OVERRIDE  (send a custom reply to a specific lead from admin UI)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/manual-reply', methods=['POST'])
+def api_manual_reply():
+    """
+    Let an admin manually send a reply to a lead from any connected Gmail account.
+    Body: { to_email, subject, body, gmail_account (optional) }
+    """
+    try:
+        data         = request.get_json(force=True)
+        to_email     = data.get('to_email', '').strip()
+        subject      = data.get('subject', '').strip()
+        body         = data.get('body', '').strip()
+        pref_account = data.get('gmail_account', '').strip()
+
+        if not to_email or not body:
+            return jsonify({"error": "to_email and body required"}), 400
+
+        # Find the account to use
+        if pref_account:
+            acct_r = supabase.table("gmail_accounts").select("*") \
+                         .eq("email", pref_account).single().execute()
+            account = acct_r.data
+        else:
+            accts = supabase.table("gmail_accounts") \
+                        .select("*").eq("gmail_connected", True).execute()
+            account = accts.data[0] if accts.data else None
+
+        if not account:
+            return jsonify({"error": "no_gmail_account_available"}), 400
+
+        # Get access token
+        token_resp = requests.post(GOOGLE_TOKEN_URL, data={
+            "client_id":     GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "refresh_token": aesgcm_decrypt(account["encrypted_refresh_token"]),
+            "grant_type":    "refresh_token",
+        }, timeout=15)
+
+        if token_resp.status_code != 200:
+            return jsonify({"error": "token_refresh_failed"}), 400
+
+        access_token = token_resp.json().get("access_token")
+
+        # Build and send
+        from email.mime.text import MIMEText as _MIME
+        msg            = _MIME(body.replace('\n', '<br>'), "html", "utf-8")
+        msg["To"]      = to_email
+        msg["From"]    = f"{account['display_name']} <{account['email']}>"
+        msg["Subject"] = subject
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8").rstrip("=")
+        send_resp = requests.post(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+            headers={"Authorization": f"Bearer {access_token}",
+                     "Content-Type": "application/json"},
+            json={"raw": raw},
+            timeout=30,
+        )
+
+        if send_resp.status_code in (200, 201):
+            supabase.table("reply_audit_log").insert({
+                "event_type": "MANUAL_REPLY_SENT",
+                "data": {"to": to_email, "subject": subject, "account": account['email']},
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+            return jsonify({"ok": True}), 200
+
+        return jsonify({"error": "send_failed", "detail": send_resp.text}), 400
+
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
