@@ -16,6 +16,7 @@
 #   GOOGLE_CLIENT_SECRET    (from Google Cloud Console)
 
 import os
+import time
 import base64
 import random
 import re
@@ -290,6 +291,30 @@ def schedule_followup(q: dict, sequence: int, account_email: str):
 
 
 # ── Main send loop ─────────────────────────────────────────────────────────────
+def get_campaign_throttle(campaign_id: int) -> tuple[int, int]:
+    """
+    Return (send_delay_seconds, send_jitter_seconds) for a campaign.
+    Falls back to env vars SEND_DELAY_SECONDS / SEND_JITTER_SECONDS, then 0.
+    """
+    try:
+        row = supabase.table("campaigns") \
+            .select("send_delay_seconds, send_jitter_seconds") \
+            .eq("id", campaign_id) \
+            .single() \
+            .execute()
+        if row.data:
+            delay  = int(row.data.get("send_delay_seconds")  or 0)
+            jitter = int(row.data.get("send_jitter_seconds") or 0)
+            return delay, jitter
+    except Exception:
+        pass
+
+    # Env-var fallback (useful for a global default without a DB column)
+    delay  = int(os.environ.get("SEND_DELAY_SECONDS",  0))
+    jitter = int(os.environ.get("SEND_JITTER_SECONDS", 0))
+    return delay, jitter
+
+
 def send_queued():
     print("=" * 60)
     print("WORKER START  (Gmail API mode)")
@@ -329,6 +354,9 @@ def send_queued():
     acct_index   = 0
     total_accnts = len(available)
     DAILY_LIMIT  = available[0]["daily_limit"] if available else 500
+
+    # Cache throttle settings per campaign so we don't query DB on every email
+    throttle_cache: dict[int, tuple[int, int]] = {}
 
     for q in queued.data:
 
@@ -399,6 +427,19 @@ def send_queued():
                 sent_count += 1
                 print(f"[SENT] {q['lead_email']} via {account['email']}  "
                       f"seq={q['sequence']}")
+
+                # ── Throttle / send delay ─────────────────────────────────
+                cid = q.get("campaign_id")
+                if cid not in throttle_cache:
+                    throttle_cache[cid] = get_campaign_throttle(cid)
+                delay, jitter = throttle_cache[cid]
+
+                if delay > 0:
+                    jitter_val  = random.randint(-jitter, jitter) if jitter > 0 else 0
+                    sleep_secs  = max(0, delay + jitter_val)
+                    print(f"[THROTTLE] Sleeping {sleep_secs}s before next send "
+                          f"(delay={delay}s, jitter=±{jitter}s)")
+                    time.sleep(sleep_secs)
 
             else:
                 failed_count += 1
