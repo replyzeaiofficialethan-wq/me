@@ -5,6 +5,17 @@ on:
   schedule:
     - cron: "0 * * * *" # Every hour
 
+# ── KEY FIX: Concurrency control ──────────────────────────────────────────────
+# Without this, your external cron + GitHub's own schedule can both trigger
+# at the same time, giving you 2 (or more) workers racing each other and
+# bypassing all throttle logic in worker.py.
+#
+# cancel-in-progress: false  → don't kill a running send job if a new trigger
+#                               arrives; let it finish, then queue the new one.
+concurrency:
+  group: email-worker-production
+  cancel-in-progress: false
+
 jobs:
   send-emails:
     runs-on: ubuntu-latest
@@ -29,6 +40,14 @@ jobs:
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          # ── Throttle knobs ─────────────────────────────────────────────
+          # MAX_EMAILS_PER_RUN  : max emails a single run will process
+          # MAX_EMAILS_PER_HOUR : global hourly cap across ALL runs (DB-tracked)
+          # GMAIL_DAILY_LIMIT   : per-account daily cap
+          MAX_EMAILS_PER_RUN: ${{ vars.MAX_EMAILS_PER_RUN || '50' }}
+          MAX_EMAILS_PER_HOUR: ${{ vars.MAX_EMAILS_PER_HOUR || '100' }}
+          GMAIL_DAILY_LIMIT: ${{ vars.GMAIL_DAILY_LIMIT || '500' }}
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
         run: python worker.py
 
       - name: Check for replies
@@ -40,8 +59,15 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: python check_replies.py
 
+  # ── Reset daily counts — separate job, runs independently ─────────────────
+  # NOTE: This job also falls under the concurrency group, so if a send-emails
+  # job is running, reset-counts will queue behind it. That's fine — the reset
+  # is idempotent and runs at midnight naturally via the hourly trigger.
   reset-counts:
     runs-on: ubuntu-latest
+    # Only reset when it's actually midnight UTC (hour 0).
+    # Without this gate, reset runs every single hour wasting runner minutes.
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.schedule, '0 0') }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
