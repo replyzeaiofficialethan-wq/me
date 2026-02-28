@@ -59,6 +59,22 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: python check_replies.py
 
+      - name: Clean up old hourly counts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python - <<'EOF'
+          import os
+          from supabase import create_client
+          from datetime import datetime, timedelta, timezone
+
+          supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_ROLE_KEY'])
+          cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+          result = supabase.table("hourly_email_counts").delete().lt("window_start", cutoff).execute()
+          print(f"Cleaned up hourly_email_counts rows older than 48 hours")
+          EOF
+
   # ── Reset daily counts — separate job, runs independently ─────────────────
   # NOTE: This job also falls under the concurrency group, so if a send-emails
   # job is running, reset-counts will queue behind it. That's fine — the reset
