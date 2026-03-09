@@ -43,6 +43,7 @@ from dotenv import load_dotenv
 from supabase import create_client
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from email_validator import validate_email, EmailNotValidError
+from notify import notify  # ← ntfy.sh push notifications
 
 load_dotenv()
 
@@ -91,6 +92,41 @@ def render_email_template(template: str, lead_data: dict) -> str:
     return rendered
 
 
+# ── CSV field parsers ─────────────────────────────────────────────────────────
+
+def _parse_last_12m_sales(raw: str) -> str:
+    """
+    Extract the sold count (first integer) from MLS export values like:
+      "39"            →  "39"
+      "(39, 7, 42)"   →  "39"   (Sold / Pending / Expired — use Sold only)
+      "39 sold"       →  "39"
+    Returns empty string if no integer found.
+    """
+    if not raw:
+        return ""
+    m = re.search(r'\d+', raw.strip())
+    return m.group(0) if m else ""
+
+
+def _parse_active_listings(raw: str) -> str:
+    """
+    Extract the first bracketed integer from MLS export values like:
+      "For Sale (3)"                               →  "3"
+      "For Sale (1), For Sale (8), For Sale (2)"   →  "1"  (first entry only)
+      "5"                                          →  "5"  (plain number fallback)
+    Returns empty string if nothing found.
+    """
+    if not raw:
+        return ""
+    # Primary: parenthesised number  e.g.  "For Sale (1)"
+    m = re.search(r'\((\d+)\)', raw)
+    if m:
+        return m.group(1)
+    # Fallback: any plain integer in the string
+    m = re.search(r'\d+', raw.strip())
+    return m.group(0) if m else ""
+
+
 # ── Gmail OAuth constants ─────────────────────────────────────────────────────
 GOOGLE_CLIENT_ID      = os.environ.get('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET  = os.environ.get('GOOGLE_CLIENT_SECRET', '')
@@ -103,11 +139,10 @@ GOOGLE_REVOKE_URL     = "https://oauth2.googleapis.com/revoke"
 # Scopes: send mail + read profile email address
 GMAIL_SCOPES = [
          "https://www.googleapis.com/auth/gmail.send",
-         "https://www.googleapis.com/auth/gmail.readonly",   # ← ADD THIS
+         "https://www.googleapis.com/auth/gmail.readonly",
          "https://www.googleapis.com/auth/userinfo.email",
          "https://www.googleapis.com/auth/userinfo.profile",
      ]
-
 
 
 # ── Flask app ─────────────────────────────────────────────────────────────────
@@ -132,34 +167,12 @@ def admin():
     return render_template('admin.html')
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  GMAIL OAUTH FLOW
-#
-#  Step 1 – /auth/gmail
-#    Admin clicks "Connect Gmail Account" → browser redirects to Google's
-#    consent screen requesting gmail.send + userinfo scopes.
-#
-#  Step 2 – Google redirects to /auth/gmail/callback
-#    We exchange the auth code for access_token + refresh_token, then call
-#    the userinfo endpoint to learn which Gmail address just connected.
-#    The refresh_token is AES-GCM encrypted and stored in gmail_accounts.
-#
-#  Step 3 – Done. Admin dashboard shows the account as connected.
-# ─────────────────────────────────────────────────────────────────────────────
-
 # ── Stateless OAuth state helpers ────────────────────────────────────────────
-# We sign the state token with HMAC-SHA256 using ENCRYPTION_KEY so we never
-# need Flask sessions.  This works across restarts, multiple workers, and any
-# reverse-proxy setup that might strip session cookies.
 import hmac
 import hashlib
 import time
 
 def _make_oauth_state() -> str:
-    """
-    Create a signed state token:  {nonce}.{timestamp}.{hmac}
-    Valid for 10 minutes.
-    """
     nonce     = secrets.token_urlsafe(24)
     ts        = str(int(time.time()))
     payload   = f"{nonce}.{ts}"
@@ -167,19 +180,14 @@ def _make_oauth_state() -> str:
     return f"{payload}.{sig}"
 
 def _verify_oauth_state(state: str, max_age: int = 600) -> bool:
-    """
-    Verify the HMAC signature and that the token is < max_age seconds old.
-    Returns True only if both checks pass.
-    """
     try:
-        parts = state.rsplit('.', 1)          # split off the hex sig at the end
+        parts = state.rsplit('.', 1)
         if len(parts) != 2:
             return False
         payload, sig = parts
         expected = hmac.new(ENCRYPTION_KEY[:32], payload.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected):
             return False
-        # Extract timestamp (second segment of payload)
         _, ts = payload.split('.', 1)
         if int(time.time()) - int(ts) > max_age:
             return False
@@ -190,11 +198,9 @@ def _verify_oauth_state(state: str, max_age: int = 600) -> bool:
 
 @app.route('/auth/gmail')
 def auth_gmail():
-    """Kick off OAuth – redirect user to Google's consent screen."""
     if not GOOGLE_CLIENT_ID:
         return "GOOGLE_CLIENT_ID not configured", 500
 
-    # CSRF protection: HMAC-signed stateless token (no Flask session needed)
     state = _make_oauth_state()
 
     params = {
@@ -202,9 +208,8 @@ def auth_gmail():
         "redirect_uri":  GOOGLE_REDIRECT_URI,
         "response_type": "code",
         "scope":         " ".join(GMAIL_SCOPES),
-        "access_type":   "offline",   # REQUIRED to get refresh_token
-        "prompt":        "consent",   # REQUIRED – forces refresh_token even if
-                                      # user already authorised this app before
+        "access_type":   "offline",
+        "prompt":        "consent",
         "state":         state,
     }
     auth_url = GOOGLE_AUTH_URL + "?" + urllib.parse.urlencode(params)
@@ -213,8 +218,6 @@ def auth_gmail():
 
 @app.route('/auth/gmail/callback')
 def auth_gmail_callback():
-    """Google redirects here after user consents."""
-    # ── CSRF check (stateless HMAC verify – no session required) ────────────
     returned_state = request.args.get('state', '')
     if not returned_state or not _verify_oauth_state(returned_state):
         return "OAuth state invalid or expired. Please try connecting again.", 400
@@ -227,7 +230,6 @@ def auth_gmail_callback():
     if not code:
         return "Missing auth code from Google.", 400
 
-    # ── Exchange code for tokens ─────────────────────────────────────────────
     token_resp = requests.post(GOOGLE_TOKEN_URL, data={
         "code":          code,
         "client_id":     GOOGLE_CLIENT_ID,
@@ -245,13 +247,9 @@ def auth_gmail_callback():
     refresh_token = tokens.get("refresh_token")
 
     if not refresh_token:
-        # This happens if the user already authorised the app without
-        # prompt=consent. The /auth/gmail route sets prompt=consent so this
-        # should never happen, but guard anyway.
         return ("No refresh_token returned. "
                 "Please revoke app access in your Google account and try again."), 400
 
-    # ── Get the user's email address from Google ─────────────────────────────
     info_resp = requests.get(
         GOOGLE_USERINFO_URL,
         headers={"Authorization": f"Bearer {access_token}"},
@@ -267,7 +265,6 @@ def auth_gmail_callback():
     if not email:
         return "Could not determine Gmail address.", 400
 
-    # ── Encrypt & store in Supabase ──────────────────────────────────────────
     encrypted_rt = aesgcm_encrypt(refresh_token)
 
     supabase.table("gmail_accounts").upsert({
@@ -295,10 +292,6 @@ def api_get_gmail_accounts():
 
 @app.route('/api/gmail-accounts/<int:account_id>', methods=['DELETE'])
 def api_delete_gmail_account(account_id):
-    """
-    Disconnect & remove a Gmail account.
-    Also attempts to revoke the token from Google's side.
-    """
     try:
         acct = supabase.table("gmail_accounts") \
             .select("encrypted_refresh_token, email") \
@@ -309,7 +302,6 @@ def api_delete_gmail_account(account_id):
         if not acct.data:
             return jsonify({"error": "Account not found"}), 404
 
-        # Try to revoke token at Google (best-effort)
         try:
             rt = aesgcm_decrypt(acct.data["encrypted_refresh_token"])
             requests.post(GOOGLE_REVOKE_URL, params={"token": rt}, timeout=10)
@@ -325,7 +317,6 @@ def api_delete_gmail_account(account_id):
 
 @app.route('/api/gmail-accounts/<int:account_id>/test', methods=['POST'])
 def api_test_gmail_account(account_id):
-    """Send a test email to the account itself to verify the token works."""
     try:
         acct = supabase.table("gmail_accounts") \
             .select("*").eq("id", account_id).single().execute()
@@ -335,7 +326,6 @@ def api_test_gmail_account(account_id):
 
         account = acct.data
 
-        # Get fresh access token
         token_resp = requests.post(GOOGLE_TOKEN_URL, data={
             "client_id":     GOOGLE_CLIENT_ID,
             "client_secret": GOOGLE_CLIENT_SECRET,
@@ -351,7 +341,6 @@ def api_test_gmail_account(account_id):
 
         access_token = token_resp.json().get("access_token")
 
-        # Build a minimal test message
         from email.mime.text import MIMEText
         msg            = MIMEText("<p>ReplyzeAI Gmail API test — connection is working!</p>", "html", "utf-8")
         msg["To"]      = account["email"]
@@ -428,17 +417,12 @@ def api_create_campaign():
     try:
         data = request.get_json(force=True)
 
-        send_delay   = int(data.get('send_delay_seconds',  0))
-        send_jitter  = int(data.get('send_jitter_seconds', 0))
-
         result = supabase.table("campaigns").insert({
-            "name":                 data.get('name'),
-            "subject":              data.get('subject'),
-            "body":                 data.get('body'),
-            "list_name":            data.get('list_name'),
-            "send_immediately":     data.get('send_immediately', False),
-            "send_delay_seconds":   send_delay,
-            "send_jitter_seconds":  send_jitter,
+            "name":             data.get('name'),
+            "subject":          data.get('subject'),
+            "body":             data.get('body'),
+            "list_name":        data.get('list_name'),
+            "send_immediately": data.get('send_immediately', False),
         }).execute()
 
         if getattr(result, "error", None):
@@ -461,17 +445,8 @@ def api_create_campaign():
                 .select("*").eq("list_name", data.get('list_name')).execute()
 
             if leads.data:
-                import random as _random
-                queue      = []
-                offset_sec = 0  # cumulative send-time offset for throttling
-
+                queue = []
                 for lead in leads.data:
-                    # Stagger each email by delay ± jitter seconds
-                    jitter_val  = _random.randint(-send_jitter, send_jitter) if send_jitter > 0 else 0
-                    step        = max(0, send_delay + jitter_val)
-                    send_time   = datetime.now(timezone.utc) + timedelta(seconds=offset_sec)
-                    offset_sec += step  # next email pushed further into the future
-
                     queue.append({
                         "campaign_id":   campaign_id,
                         "lead_id":       lead['id'],
@@ -479,11 +454,17 @@ def api_create_campaign():
                         "subject":       render_email_template(data.get('subject', ''), lead),
                         "body":          render_email_template(data.get('body', ''),    lead),
                         "sequence":      0,
-                        "scheduled_for": send_time.isoformat(),
+                        "scheduled_for": datetime.now(timezone.utc).isoformat(),
                     })
 
                 for i in range(0, len(queue), 100):
                     supabase.table("email_queue").insert(queue[i:i+100]).execute()
+
+                notify(
+                    '📣 Campaign Queued',
+                    f'"{data.get("name", "")}" → {len(leads.data)} emails queued immediately.',
+                    priority='default', tags='loudspeaker',
+                )
 
         return jsonify({"ok": True, "campaign": campaign}), 200
 
@@ -574,13 +555,14 @@ def api_import_leads():
 
         raw     = file.read()
         decoded = None
-        for enc in ('utf-8', 'latin-1', 'windows-1252', 'iso-8859-1'):
+        for enc in ('utf-8-sig', 'utf-8', 'latin-1', 'windows-1252', 'iso-8859-1'):
             try:
                 decoded = raw.decode(enc); break
             except UnicodeDecodeError:
                 continue
         if decoded is None:
             decoded = raw.decode('latin-1')
+        decoded = decoded.lstrip('\ufeff')
 
         reader = csv.DictReader(io.StringIO(decoded))
 
@@ -590,14 +572,39 @@ def api_import_leads():
             return jsonify({"error": "CSV must contain an email column"}), 400
 
         HEADER_ALIASES = {
+            # name
+            "name": "name", "first name": "name", "first_name": "name",
+            "firstname": "name", "full name": "name", "full_name": "name",
+            "contact name": "name", "contact_name": "name",
+            # last name
+            "lastname": "last name", "last_name": "last name", "surname": "last name",
+            # ai hooks
             "ai hook": "ai hooks", "ai hooks": "ai hooks", "ai_hook": "ai hooks",
+            # last sale
             "lastsale": "last sale", "last sale": "last sale", "last_sale": "last sale",
+            # open house
             "openhouse": "open house", "open house": "open house", "open_house": "open house",
-            "lastname": "last name", "last_name": "last name",
+            # ── NEW: last 12 month sales (MLS export variations) ──────────────
+            "last 12 m sales":     "last_12m_sales",
+            "last 12m sales":      "last_12m_sales",
+            "last12msales":        "last_12m_sales",
+            "last 12 month sales": "last_12m_sales",
+            "last12monthsales":    "last_12m_sales",
+            "12m sales":           "last_12m_sales",
+            "12 m sales":          "last_12m_sales",
+            "last_12m_sales":      "last_12m_sales",
+            # ── NEW: active listings (MLS export variations) ──────────────────
+            "active listings":     "active_listings",
+            "activelistings":      "active_listings",
+            "active listing":      "active_listings",
+            "active_listings":     "active_listings",
         }
+
         STANDARD_FIELDS = {
             "email", "name", "last name", "city", "brokerage",
             "service", "street", "ai hooks", "open house", "last sale",
+            # NEW
+            "last_12m_sales", "active_listings",
         }
 
         leads_by_email = {}
@@ -608,7 +615,8 @@ def api_import_leads():
             for k, v in row.items():
                 if not k:
                     continue
-                key = HEADER_ALIASES.get(k.strip().lower(), k.strip().lower())
+                clean_k = re.sub(r'[^\x20-\x7E]', '', k).strip().lower()
+                key = HEADER_ALIASES.get(clean_k, clean_k)
                 cleaned[key] = v.strip() if v else ""
 
             email = cleaned.get("email", "").lower()
@@ -619,20 +627,32 @@ def api_import_leads():
             except EmailNotValidError:
                 continue
 
+            # ── Parse structured MLS fields ───────────────────────────────────
+            # last_12m_sales: first integer from e.g. "(39, 7, 42)" → "39"
+            raw_sales = cleaned.get("last_12m_sales", "")
+            cleaned["last_12m_sales"] = _parse_last_12m_sales(raw_sales)
+
+            # active_listings: first bracketed int from e.g. "For Sale (1)" → "1"
+            raw_listings = cleaned.get("active_listings", "")
+            cleaned["active_listings"] = _parse_active_listings(raw_listings)
+
             leads_by_email[email] = {
-                "email":         email,
-                "name":          cleaned.get("name", ""),
-                "last_name":     cleaned.get("last name", ""),
-                "city":          cleaned.get("city", ""),
-                "brokerage":     cleaned.get("brokerage", ""),
-                "service":       cleaned.get("service", ""),
-                "street":        cleaned.get("street", ""),
-                "ai_hooks":      cleaned.get("ai hooks", ""),
-                "open_house":    cleaned.get("open house", ""),
-                "last_sale":     cleaned.get("last sale", ""),
-                "list_name":     list_name,
-                "custom_fields": {k: v for k, v in cleaned.items()
-                                  if k not in STANDARD_FIELDS},
+                "email":            email,
+                "name":             cleaned.get("name", ""),
+                "last_name":        cleaned.get("last name", ""),
+                "city":             cleaned.get("city", ""),
+                "brokerage":        cleaned.get("brokerage", ""),
+                "service":          cleaned.get("service", ""),
+                "street":           cleaned.get("street", ""),
+                "ai_hooks":         cleaned.get("ai hooks", ""),
+                "open_house":       cleaned.get("open house", ""),
+                "last_sale":        cleaned.get("last sale", ""),
+                # NEW parsed fields
+                "last_12m_sales":   cleaned["last_12m_sales"],
+                "active_listings":  cleaned["active_listings"],
+                "list_name":        list_name,
+                "custom_fields":    {k: v for k, v in cleaned.items()
+                                     if k not in STANDARD_FIELDS},
             }
 
         leads = list(leads_by_email.values())
@@ -943,29 +963,6 @@ def api_get_workflow_runs():
         return jsonify({"error": str(e)}), 500
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# reply_routes.py
-#
-# INSTRUCTIONS: Copy everything below (from the first @app.route to the end)
-# and paste it into app.py, just BEFORE the final:
-#
-#     if __name__ == "__main__":
-#         app.run(...)
-#
-# Also update GMAIL_SCOPES near the top of app.py to add the read scope:
-#
-#     GMAIL_SCOPES = [
-#         "https://www.googleapis.com/auth/gmail.send",
-#         "https://www.googleapis.com/auth/gmail.readonly",   # ← ADD THIS
-#         "https://www.googleapis.com/auth/userinfo.email",
-#         "https://www.googleapis.com/auth/userinfo.profile",
-#     ]
-#
-# After pasting, re-auth your Gmail accounts via /auth/gmail so the new scope
-# is granted.
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PILOTS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -996,7 +993,6 @@ def api_get_pilot(pilot_id):
 
 @app.route('/api/pilots/<int:pilot_id>', methods=['PATCH'])
 def api_update_pilot(pilot_id):
-    """Update pilot status, inbound_count, notes, etc."""
     try:
         data = request.get_json(force=True)
         allowed = {
@@ -1009,7 +1005,6 @@ def api_update_pilot(pilot_id):
         update["updated_at"] = datetime.now(timezone.utc).isoformat()
         supabase.table("pilots").update(update).eq("id", pilot_id).execute()
 
-        # Log status transitions
         if "status" in update:
             supabase.table("reply_audit_log").insert({
                 "event_type": "PILOT_STATUS_CHANGED",
@@ -1024,7 +1019,6 @@ def api_update_pilot(pilot_id):
 
 @app.route('/api/pilots/stats', methods=['GET'])
 def api_pilots_stats():
-    """Summary counts for the dashboard metrics panel."""
     try:
         all_pilots = supabase.table("pilots").select("status").execute()
         counts: dict = {}
@@ -1035,7 +1029,6 @@ def api_pilots_stats():
         total  = len(all_pilots.data)
         active = counts.get("active", 0) + counts.get("running", 0)
 
-        # Replied count from processed_replies (excluding NOT_A_LEAD, DO_NOT_CONTACT)
         pr = supabase.table("processed_replies") \
             .select("intent") \
             .neq("intent", "NOT_A_LEAD") \
@@ -1093,6 +1086,11 @@ def api_resolve_ticket(ticket_id):
             "resolved_by": data.get("resolved_by", "admin"),
             "resolved_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", ticket_id).execute()
+        notify(
+            '✅ Ticket Resolved',
+            f'Ticket #{ticket_id} was resolved by {data.get("resolved_by", "admin")}.',
+            priority='low', tags='white_check_mark',
+        )
         return jsonify({"ok": True}), 200
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
@@ -1128,7 +1126,7 @@ def api_get_reply_audit():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  PROCESSED REPLIES  (for the "Inbound Replies" table in admin UI)
+#  PROCESSED REPLIES
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.route('/api/processed-replies', methods=['GET'])
@@ -1150,15 +1148,11 @@ def api_get_processed_replies():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  MANUAL OVERRIDE  (send a custom reply to a specific lead from admin UI)
+#  MANUAL OVERRIDE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.route('/api/manual-reply', methods=['POST'])
 def api_manual_reply():
-    """
-    Let an admin manually send a reply to a lead from any connected Gmail account.
-    Body: { to_email, subject, body, gmail_account (optional) }
-    """
     try:
         data         = request.get_json(force=True)
         to_email     = data.get('to_email', '').strip()
@@ -1169,7 +1163,6 @@ def api_manual_reply():
         if not to_email or not body:
             return jsonify({"error": "to_email and body required"}), 400
 
-        # Find the account to use
         if pref_account:
             acct_r = supabase.table("gmail_accounts").select("*") \
                          .eq("email", pref_account).single().execute()
@@ -1182,7 +1175,6 @@ def api_manual_reply():
         if not account:
             return jsonify({"error": "no_gmail_account_available"}), 400
 
-        # Get access token
         token_resp = requests.post(GOOGLE_TOKEN_URL, data={
             "client_id":     GOOGLE_CLIENT_ID,
             "client_secret": GOOGLE_CLIENT_SECRET,
@@ -1195,7 +1187,6 @@ def api_manual_reply():
 
         access_token = token_resp.json().get("access_token")
 
-        # Build and send
         from email.mime.text import MIMEText as _MIME
         msg            = _MIME(body.replace('\n', '<br>'), "html", "utf-8")
         msg["To"]      = to_email
@@ -1217,12 +1208,92 @@ def api_manual_reply():
                 "data": {"to": to_email, "subject": subject, "account": account['email']},
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }).execute()
+            notify(
+                '📤 Manual Reply Sent',
+                f'To: {to_email}\nSubject: {subject or "(no subject)"}\nFrom: {account["email"]}',
+                priority='low', tags='outbox_tray',
+            )
             return jsonify({"ok": True}), 200
 
         return jsonify({"error": "send_failed", "detail": send_resp.text}), 400
 
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  NOTIFICATION TEST ENDPOINTS  (called from the Notifications tab in admin)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import time as _time
+
+_TEST_EVENTS = {
+    'pilot_created':     ('🏠 Pilot Created',         'john.smith@kw.com sent a listing URL → 123 Maple St Denver CO 80203\nSubject: Re: Your listing',         'high',    'house,rotating_light'),
+    'yes_no_url':        ('📋 Agent Interested',       'sarah.jones@realty.com is interested but hasn\'t shared a URL yet.\nSubject: Re: Free pilot offer',        'high',    'memo,rotating_light'),
+    'forwarded_lead':    ('📨 Forwarded Lead',         'mike.broker@compass.com forwarded a buyer lead.\nSubject: Fwd: Interested in your listing',                'high',    'inbox_tray,rotating_light'),
+    'negative':          ('⚠️ Negative Objection',    'angry.agent@gmail.com\n"Stop emailing me, my listing is already under contract and your info is wrong!"',  'high',    'warning'),
+    'auto_reply_failed': ('❌ Auto-Reply Failed',      'Could not send auto-reply to broken@domain.com\nIntent: YES_NO_URL\nAccount: outreach@replyzeai.com',      'high',    'x,warning'),
+    'asks_price':        ('💰 Pricing Question',       'curious.agent@kw.com asked about pricing.\nSubject: How much does this cost?',                             'default', 'moneybag'),
+    'asks_details':      ('❓ Details Question',       'tech.savvy@compass.com asked how the system works.\nSubject: How does the setup work?',                    'default', 'question'),
+    'unsubscribe':       ('🚫 Unsubscribe',            'opt.out@gmail.com opted out and was marked do-not-contact.',                                               'low',     'no_entry'),
+    'run_complete':      ('📬 Reply Run Complete',     '5 message(s) processed across 2 account(s).',                                                              'low',     'email'),
+    'campaign_queued':   ('📣 Campaign Queued',        '"Spring Outreach 2026" → 342 emails queued immediately.',                                                  'default', 'loudspeaker'),
+    'manual_reply_sent': ('📤 Manual Reply Sent',      'To: vip.lead@gmail.com\nSubject: Following up on your question\nFrom: outreach@replyzeai.com',             'low',     'outbox_tray'),
+    'ticket_resolved':   ('✅ Ticket Resolved',        'Ticket #42 was resolved by admin.',                                                                        'low',     'white_check_mark'),
+    'batch_done':        ('📧 15 Emails Sent',         'Batch complete — 15 email(s) delivered successfully.',                                                     'low',     'email'),
+    'send_limit':        ('⚠️ Daily Limit Reached',   'All SMTP accounts have hit their 50-email daily limit. No emails sent until tomorrow.',                    'high',    'warning'),
+}
+_HIGH_PRIORITY_EVENTS = {k for k, v in _TEST_EVENTS.items() if v[2] == 'high'}
+
+
+@app.route('/api/notify/test', methods=['POST'])
+def api_notify_test():
+    """Send a custom one-off push notification from the admin panel."""
+    try:
+        data     = request.get_json(force=True)
+        title    = data.get('title', 'Test').strip()[:100]
+        message  = data.get('message', 'Hello').strip()[:500]
+        priority = data.get('priority', 'default')
+        tags     = data.get('tags', '')
+        if priority not in ('urgent', 'high', 'default', 'low', 'min'):
+            priority = 'default'
+        notify(title, message, priority=priority, tags=tags)
+        return jsonify({'ok': True}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/notify/test-event', methods=['POST'])
+def api_notify_test_event():
+    """Fire a single named test notification."""
+    try:
+        data  = request.get_json(force=True)
+        key   = data.get('event', '').strip()
+        if key not in _TEST_EVENTS:
+            return jsonify({'error': f'Unknown event key: {key!r}'}), 400
+        title, message, priority, tags = _TEST_EVENTS[key]
+        notify(title, message, priority=priority, tags=tags)
+        return jsonify({'ok': True, 'fired': key}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/notify/test-all', methods=['POST'])
+def api_notify_test_all():
+    """Fire all test notifications (or only high-priority ones) — no sleep, pacing done in JS."""
+    try:
+        data       = request.get_json(force=True)
+        filt       = data.get('filter', 'all')  # 'all' | 'high'
+        keys       = list(_TEST_EVENTS.keys())
+        if filt == 'high':
+            keys = [k for k in keys if k in _HIGH_PRIORITY_EVENTS]
+        for k in keys:
+            title, message, priority, tags = _TEST_EVENTS[k]
+            notify(title, message, priority=priority, tags=tags)
+        return jsonify({"ok": True, "fired": len(keys), "events": keys}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
