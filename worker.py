@@ -7,8 +7,7 @@ from datetime import datetime, timedelta, date, timezone
 from supabase import create_client
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import urllib.parse
-import re
-from notify import notify  # ← ntfy.sh push notifications
+import re # ← ntfy.sh push notifications
 
 # Initialize Supabase
 SUPABASE_URL = os.environ['SUPABASE_URL']
