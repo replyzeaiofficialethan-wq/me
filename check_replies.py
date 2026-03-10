@@ -762,56 +762,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _create_ops_ticket(from_email, subject, body_text, intent)
         _log_audit('OPS_TICKET_CREATED', {"from": from_email, "intent": intent})
 
-    # ── Push notifications ─────────────────────────────────────────────────────
-    _subject_short = subject[:60] if subject else ''
-    if intent == 'YES_WITH_URL':
-        notify(
-            '🏠 Pilot Created',
-            f'{from_email}\nSent a listing URL → {address}\nSubject: {_subject_short}',
-            priority='high', tags='house,rotating_light',
-        )
-    elif intent == 'YES_NO_URL':
-        notify(
-            '📋 Ops Ticket – Agent Interested',
-            f'{from_email} is interested but hasn\'t shared a URL yet.\nSubject: {_subject_short}',
-            priority='high', tags='memo,rotating_light',
-        )
-    elif intent == 'FORWARDED_LEAD':
-        notify(
-            '📨 Forwarded Lead Received',
-            f'{from_email} forwarded a buyer lead.\nSubject: {_subject_short}',
-            priority='high', tags='inbox_tray,rotating_light',
-        )
-    elif intent == 'ASKS_PRICE':
-        notify(
-            '💰 Pricing Question',
-            f'{from_email} asked about pricing.\nSubject: {_subject_short}',
-            priority='default', tags='moneybag',
-        )
-    elif intent == 'ASKS_DETAILS':
-        notify(
-            '❓ Details Question',
-            f'{from_email} asked how the system works.\nSubject: {_subject_short}',
-            priority='default', tags='question',
-        )
-    elif intent == 'PASS_UNSUB':
-        notify(
-            '🚫 Unsubscribe',
-            f'{from_email} opted out and was marked do-not-contact.',
-            priority='low', tags='no_entry',
-        )
-    elif intent == 'NEGATIVE_OBJECTION':
-        notify(
-            '⚠️ Negative Objection',
-            f'{from_email}\n"{body_text[:120].strip()}…"',
-            priority='high', tags='warning',
-        )
-    else:
-        notify(
-            f'📋 Ops Ticket – {intent}',
-            f'{from_email}\nUnknown intent, needs manual review.\nSubject: {_subject_short}',
-            priority='default', tags='memo',
-        )
+   
     # ───────────────────────────────────────────────────────────────────────────
 
     auto_reply_sent = False
@@ -842,11 +793,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
                 "intent":  intent,
                 "account": account['email'],
             })
-            notify(
-                '❌ Auto-Reply Failed',
-                f'Could not send auto-reply to {from_email}\nIntent: {intent}\nAccount: {account["email"]}',
-                priority='high', tags='x,warning',
-            )
+            
 
     _mark_processed(
         gmail_msg_id, account['email'], from_email,
