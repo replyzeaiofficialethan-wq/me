@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from supabase import create_client
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from notify import notify  # ← ntfy.sh push notifications
+#from notify import notify  # ← ntfy.sh push notifications
 
 # ── Supabase ──────────────────────────────────────────────────────────────────
 SUPABASE_URL = os.environ['SUPABASE_URL']
