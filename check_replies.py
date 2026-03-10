@@ -868,12 +868,7 @@ def check_all_replies():
     print("\n" + "=" * 60)
     print(f"DONE  total_processed={total}")
 
-    if total > 0:
-        notify(
-            f'📬 Reply Run Complete',
-            f'{total} message(s) processed across {len(accounts.data)} account(s).',
-            priority='low', tags='email',
-        )
+    
 
 
 if __name__ == "__main__":
