@@ -328,6 +328,14 @@ def extract_address_from_url(url: str | None) -> str:
 
 
 # ── Other regex patterns ──────────────────────────────────────────────────────
+# PASS — two-tier
+_RE_PASS_STRICT = re.compile(r'^\s*pass[.!?\s]*$', re.I)
+_RE_PASS_LOOSE  = re.compile(
+    r"\b(unsubscribe|opt.?out|remove me|take me off|stop emailing|"
+    r"stop contacting|don'?t (email|contact|message) me|"
+    r"no longer (interested|want))\b",
+    re.I
+)
 _RE_YES = re.compile(
     r"\b(yes|yep|yeah|sure|count me in|i'?m in|let'?s do it|sounds good|"
     r"i'?d like|interested|go ahead|please do|sign me up|i want|"
@@ -340,15 +348,6 @@ _RE_PRICE = re.compile(
 _RE_DETAILS = re.compile(
     r"\b(how does|how do|what is|what are|setup|smtp|login|dashboard|"
     r"integrat|works?|explain|technical|details?|api|connect|plug.?in)\b", re.I
-)
-
-# PASS — two-tier
-_RE_PASS_STRICT = re.compile(r'^\s*pass[.!?\s]*$', re.I)
-_RE_PASS_LOOSE  = re.compile(
-    r"\b(unsubscribe|opt.?out|remove me|take me off|stop emailing|"
-    r"stop contacting|don'?t (email|contact|message) me|"
-    r"no longer (interested|want))\b",
-    re.I
 )
 
 _RE_FORWARD = re.compile(
