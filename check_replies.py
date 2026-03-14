@@ -5,7 +5,6 @@ import re
 import json
 import base64
 import time
-import random
 import requests
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
@@ -787,10 +786,6 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
 
     auto_reply_sent = False
     if reply_html:
-        jitter_secs = random.randint(90, 180)
-        print(f"  [JITTER] Waiting {jitter_secs}s …")
-        time.sleep(jitter_secs)
-
         ok = _send_gmail_reply(account, access_token,
                                from_email, subject, reply_html,
                                thread_id, orig_msg_id)
