@@ -665,7 +665,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         return
 
     lead_r = supabase.table("leads") \
-                 .select("id,email,name,do_not_contact,listing_address,street,active_listings") \
+                 .select("id,email,name,do_not_contact") \
                  .eq("email", from_email).execute()
     if not lead_r.data:
         _mark_processed(gmail_msg_id, account['email'], from_email, 'NOT_A_LEAD', False)
@@ -709,13 +709,6 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     groq_reply   = (groq_result or {}).get("reply_html", "").strip()
     reply_html: str | None = None
 
-    # Pull best listing address from lead record for template use
-    _lead_listing_addr = (
-        lead.get('listing_address')
-        or lead.get('street')
-        or ''
-    ).strip()
-
     if intent == 'YES_WITH_URL':
         url        = extract_listing_url(body_text)
         address    = extract_address_from_url(url)
@@ -731,7 +724,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _update_lead_status(from_email, 'pilot_pending_setup')
 
     elif intent == 'YES_NO_URL':
-        reply_html = groq_reply or _tmpl_yes_no_url(_lead_listing_addr)
+        reply_html = groq_reply or _tmpl_yes_no_url()
         _create_ops_ticket(from_email, subject, body_text, 'YES_AWAITING_LISTING')
         _log_audit('YES_AWAITING_LISTING', {
             "agent":   from_email,
