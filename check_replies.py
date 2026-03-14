@@ -103,6 +103,14 @@ CRITICAL RULES:
   our info is wrong → NEGATIVE_OBJECTION.
 - Only reply with apology/de-escalation for NEGATIVE_OBJECTION; never use a sales pitch.
 
+REPLY TONE FOR YES_NO_URL (CRITICAL):
+  Do NOT pitch or sell anything. The only goal is to move them to setup.
+  Keep it short — 3–4 lines max. Structure:
+    "Great." (one word opener)
+    Mention running it on one of their listings. (reference their listing if you know it)
+    List 3 things it does automatically: qualifies inquiries, follows up, books showings.
+    End with: "Takes about 5 minutes to connect. Want me to send a quick walkthrough?"
+
 Respond ONLY with valid JSON (no markdown, no code fences):
 {
   "intent": "INTENT_LABEL",
@@ -431,10 +439,22 @@ def _tmpl_yes_with_url(address: str, oh_date: str = 'TBD') -> str:
         "Reply <strong>CONFIRM</strong> if correct or paste the correct date/time."
     )
 
-def _tmpl_yes_no_url() -> str:
+def _tmpl_yes_no_url(listing_address: str = '') -> str:
+    addr_line = (
+        f"The easiest way is to run it on one of your listings like "
+        f"<strong>{listing_address}</strong>."
+        if listing_address
+        else "The easiest way is to run it on one of your active listings."
+    )
     return (
-        "Which listing do you want us to take off your plate?<br><br>"
-        "Just reply with the address or paste the listing URL and I'll set everything up."
+        "Great.<br><br>"
+        f"{addr_line}<br><br>"
+        "It automatically:<br>"
+        "• qualifies inquiries<br>"
+        "• follows up<br>"
+        "• books showing requests on your calendar<br><br>"
+        "Takes about 5 minutes to connect.<br><br>"
+        "Want me to send a quick walkthrough?"
     )
 
 def _tmpl_forwarded_lead(address: str) -> str:
@@ -644,7 +664,8 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     if _is_processed(gmail_msg_id):
         return
 
-    lead_r = supabase.table("leads").select("id,email,name,do_not_contact") \
+    lead_r = supabase.table("leads") \
+                 .select("id,email,name,do_not_contact,listing_address,street,active_listings") \
                  .eq("email", from_email).execute()
     if not lead_r.data:
         _mark_processed(gmail_msg_id, account['email'], from_email, 'NOT_A_LEAD', False)
@@ -688,6 +709,13 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     groq_reply   = (groq_result or {}).get("reply_html", "").strip()
     reply_html: str | None = None
 
+    # Pull best listing address from lead record for template use
+    _lead_listing_addr = (
+        lead.get('listing_address')
+        or lead.get('street')
+        or ''
+    ).strip()
+
     if intent == 'YES_WITH_URL':
         url        = extract_listing_url(body_text)
         address    = extract_address_from_url(url)
@@ -703,7 +731,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _update_lead_status(from_email, 'pilot_pending_setup')
 
     elif intent == 'YES_NO_URL':
-        reply_html = groq_reply or _tmpl_yes_no_url()
+        reply_html = groq_reply or _tmpl_yes_no_url(_lead_listing_addr)
         _create_ops_ticket(from_email, subject, body_text, 'YES_AWAITING_LISTING')
         _log_audit('YES_AWAITING_LISTING', {
             "agent":   from_email,
