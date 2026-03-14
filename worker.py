@@ -495,14 +495,23 @@ def send_queued():
 
         # ── Send ──────────────────────────────────────────────────────────
         try:
+            # Final substitution pass: inject sender name now that we know the account.
+            # This resolves {my name} / {my_name} which can't be filled at queue time.
+            sender_vars   = {
+                "my name": account.get("display_name", ""),
+                "my_name": account.get("display_name", ""),
+            }
+            final_subject = render_email_template(q["subject"], sender_vars)
+            final_body    = render_email_template(q["body"],    sender_vars)
+
             tracked_body = replace_urls_with_tracking(
-                q["body"], q["lead_id"], q["campaign_id"], q["id"]
+                final_body, q["lead_id"], q["campaign_id"], q["id"]
             )
 
             ok = send_email_via_gmail(
                 account   = account,
                 to_email  = q["lead_email"],
-                subject   = q["subject"],
+                subject   = final_subject,
                 html_body = tracked_body,
             )
 
