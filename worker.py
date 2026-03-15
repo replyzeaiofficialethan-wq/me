@@ -520,7 +520,7 @@ def send_queued():
                     "sent_at":    datetime.now(timezone.utc).isoformat(),
                     "sent_from":  account["email"],
                     "claimed_at": None,   # clear claim now that it's done
-                }).match({"id": q["id"]}).execute()
+                }).eq("id", q["id"]).execute()
 
                 new_count = current_count + 1
                 update_daily_count(account["email"], new_count)
