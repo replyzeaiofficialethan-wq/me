@@ -67,24 +67,32 @@ GROQ_KEYS:    list[str] = _load_groq_keys()
 _groq_cursor: int       = 0
 
 _GROQ_VALID_INTENTS = {
-    'YES_WITH_URL', 'YES_NO_URL', 'FORWARDED_LEAD', 'ASKS_PRICE',
+    'YES_WITH_URL', 'YES_NO_URL', 'CRM_REPLY', 'FORWARDED_LEAD', 'ASKS_PRICE',
     'ASKS_DETAILS', 'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'QUESTION_OTHER', 'UNKNOWN'
 }
 
 _GROQ_SYSTEM_PROMPT = """\
 You are an intelligent reply analyzer for a real estate AI outreach system called ReplyzeAI.
 
-A real estate agent has replied to an automated cold outreach email. Your job is to:
+A real estate agent has replied to a cold outreach email offering a FREE 14-day open house
+automation pilot. The original email offered to automatically qualify showings and book
+confirmed attendees for one of their open houses — guaranteed: if they don't get at least
+2 qualified showings booked automatically in 14 days, they owe nothing and keep the setup.
+Zero setup is required on the agent's end. Your job is to:
 1. READ and UNDERSTAND exactly what they are saying in their own words
 2. Classify their REAL intent — do NOT be fooled by email thread quotes
 3. Write a short, human, contextually appropriate reply
 
 INTENT LABELS (pick exactly one):
-- YES_WITH_URL       : They want to proceed AND included a listing URL
+- YES_WITH_URL       : They want to proceed AND included a listing or open house URL
 - YES_NO_URL         : They are interested / want to proceed, no listing URL yet
+- CRM_REPLY          : They are answering our question about which CRM they use —
+                       look for CRM names (Follow Up Boss, KvCore, Chime, BoomTown,
+                       Sierra, LionDesk, HubSpot, Salesforce, Lofty, CINC, etc.) or
+                       phrases like "we use X", "I'm on X", "my CRM is X", "don't use one"
 - FORWARDED_LEAD     : They GENUINELY forwarded a buyer inquiry — the email contains
                        FULL email headers (From:, To:, Subject:, Date:) from a third party
-- ASKS_PRICE         : They are asking about pricing / cost
+- ASKS_PRICE         : They are asking about pricing / cost after the pilot
 - ASKS_DETAILS       : They want to know how the system works
 - PASS_UNSUB         : They are politely declining or asking to be removed
 - NEGATIVE_OBJECTION : They are upset, frustrated, correcting wrong information,
@@ -102,13 +110,16 @@ CRITICAL RULES:
   our info is wrong → NEGATIVE_OBJECTION.
 - Only reply with apology/de-escalation for NEGATIVE_OBJECTION; never use a sales pitch.
 
-REPLY TONE FOR YES_NO_URL (CRITICAL):
-  Do NOT pitch or sell anything. The only goal is to move them to setup.
-  Keep it short — 3–4 lines max. Structure:
-    "Great." (one word opener)
-    Mention running it on one of their listings. (reference their listing if you know it)
-    List 3 things it does automatically: qualifies inquiries, follows up, books showings.
-    End with: "Takes about 5 minutes to connect. Want me to send a quick walkthrough?"
+REPLY TONE FOR YES_WITH_URL AND YES_NO_URL (CRITICAL):
+  Do NOT confirm the pilot or pitch anything. The ONLY goal is to find out what CRM they use.
+  Keep it to 2–3 lines max. Structure:
+    Acknowledge their YES warmly in one short sentence.
+    Ask: "Quick question before I get everything set up — which CRM do you use to manage your leads?"
+    Give 2–3 examples in parentheses: (Follow Up Boss, KvCore, HubSpot, etc.)
+
+REPLY TONE FOR CRM_REPLY:
+  Do NOT generate a reply — return an empty string for reply_html.
+  The admin will handle the next step manually.
 
 Respond ONLY with valid JSON (no markdown, no code fences):
 {
@@ -366,6 +377,15 @@ _RE_EMAIL_BLOCK = re.compile(
     r"(^from:\s.+\n(to|cc|subject|date):\s)", re.I | re.MULTILINE
 )
 
+_RE_CRM = re.compile(
+    r"\b(follow\s*up\s*boss|kvcore|kv\s*core|chime|boomtown|boom\s*town|"
+    r"sierra\s*interactive|liondesk|lion\s*desk|hubspot|salesforce|lofty|"
+    r"cinc|ylopo|propertybase|top\s*producer|wise\s*agent|real\s*geeks|"
+    r"contactually|zoho|monday\.?com|pipedrive|no\s*crm|don'?t\s*use\s*(a\s*)?crm|"
+    r"(we\s*(use|run|have)|i\s*use|i'?m\s*on|my\s*crm\s*is)\s+\w+)\b",
+    re.I
+)
+
 
 # ── Intent classifier ─────────────────────────────────────────────────────────
 
@@ -408,6 +428,9 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
     if _RE_EMAIL_BLOCK.search(t):
         return 'FORWARDED_LEAD'
 
+    if _RE_CRM.search(t):
+        return 'CRM_REPLY'
+
     if _RE_PRICE.search(t):
         return 'ASKS_PRICE'
 
@@ -429,31 +452,40 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
 
 # ── Auto-reply templates ──────────────────────────────────────────────────────
 
-def _tmpl_yes_with_url(address: str, oh_date: str = 'TBD') -> str:
+def _tmpl_crm_ask() -> str:
     return (
-        f"Perfect — reserving a pilot slot for <strong>{address}</strong>.<br><br>"
-        "I'll capture the next 3–5 inbound inquiries and send you confirmed attendees / "
-        "booking screenshots before the open house. No setup needed from you.<br><br>"
+        "Sounds good — quick question before I get everything set up.<br><br>"
+        "Which CRM do you use to manage your leads? "
+        "(Follow Up Boss, KvCore, HubSpot, Salesforce, etc.)"
+    )
+
+def _tmpl_yes_with_url(address: str, oh_date: str = 'TBD') -> str:
+    # Kept for manual reply template compatibility; auto-path now uses _tmpl_crm_ask()
+    return (
+        f"Perfect — starting the 14-day pilot on <strong>{address}</strong>.<br><br>"
+        "I'll qualify inbound inquiries and get confirmed showing bookings in front of you — "
+        "zero setup on your end.<br><br>"
+        "If you don't get at least 2 qualified showings booked automatically in 14 days, "
+        "you owe nothing and keep the setup.<br><br>"
         f"Quick check: is the open house date/time {oh_date}? "
-        "Reply <strong>CONFIRM</strong> if correct or paste the correct date/time."
+        "Reply <strong>CONFIRM</strong> if correct or paste the right date/time."
     )
 
 def _tmpl_yes_no_url(listing_address: str = '') -> str:
+    # Kept for manual reply template compatibility; auto-path now uses _tmpl_crm_ask()
     addr_line = (
-        f"The easiest way is to run it on one of your listings like "
-        f"<strong>{listing_address}</strong>."
+        f"Which open house do you want to run it on first — "
+        f"<strong>{listing_address}</strong>, or a different one?"
         if listing_address
-        else "The easiest way is to run it on one of your active listings."
+        else "Which open house do you want to run it on?"
     )
     return (
         "Great.<br><br>"
         f"{addr_line}<br><br>"
-        "It automatically:<br>"
-        "• qualifies inquiries<br>"
-        "• follows up<br>"
-        "• books showing requests on your calendar<br><br>"
-        "Takes about 5 minutes to connect.<br><br>"
-        "Want me to send a quick walkthrough?"
+        "Zero setup on your end — I handle everything. "
+        "If you don't get at least 2 qualified showings booked automatically in 14 days, "
+        "you owe nothing and keep the setup.<br><br>"
+        "Just reply with the address or paste the listing URL and I'll get it running."
     )
 
 def _tmpl_forwarded_lead(address: str) -> str:
@@ -465,15 +497,19 @@ def _tmpl_forwarded_lead(address: str) -> str:
 
 def _tmpl_asks_price() -> str:
     return (
-        "Short answer — pilot is free for 3–5 days. I'll send results and plan options "
-        "at the end.<br><br>"
-        "Reply <strong>PRICE</strong> if you want current plan details now."
+        "Short answer — the pilot is completely free for 14 days. "
+        "If you don't get at least 2 qualified showings booked automatically, "
+        "you owe nothing and keep the setup.<br><br>"
+        "Reply <strong>PRICE</strong> if you want plan details after the pilot."
     )
 
 def _tmpl_asks_details() -> str:
     return (
-        "Good question — no login required for the pilot. I handle setup.<br><br>"
-        "Reply <strong>SETUP</strong> to start the pilot, or "
+        "Good question — zero setup on your end, I handle everything.<br><br>"
+        "It qualifies inbound inquiries for your open house automatically and books "
+        "confirmed showings without you lifting a finger. 14-day free pilot, "
+        "2 qualified bookings guaranteed or you owe nothing.<br><br>"
+        "Reply <strong>SETUP</strong> to start, or "
         "<strong>TECH</strong> for a one-paragraph technical breakdown."
     )
 
@@ -619,16 +655,23 @@ def _handle_unsub(email: str):
     except:
         pass
 
-def _create_ops_ticket(from_email: str, subject: str, raw_body: str, intent: str):
+def _create_ops_ticket(from_email: str, subject: str, raw_body: str, intent: str,
+                       extra: dict | None = None):
     try:
-        supabase.table("ops_tickets").insert({
+        row = {
             "from_email": from_email,
             "subject":    subject,
             "raw_body":   raw_body[:2000],
             "intent":     intent,
             "status":     "open",
             "created_at": datetime.now(timezone.utc).isoformat(),
-        }).execute()
+        }
+        if extra:
+            # Merge extra fields into raw_body as a JSON appendix so they survive
+            # without schema changes — e.g. listing_url for YES_CRM_PENDING tickets
+            import json as _json
+            row["raw_body"] = raw_body[:1800] + "\n\n__meta__:" + _json.dumps(extra)
+        supabase.table("ops_tickets").insert(row).execute()
     except Exception as exc:
         print(f"[OPS TICKET ERROR] {exc}")
 
@@ -711,26 +754,40 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     if intent == 'YES_WITH_URL':
         url        = extract_listing_url(body_text)
         address    = extract_address_from_url(url)
-        reply_html = groq_reply or _tmpl_yes_with_url(address)
-        pilot      = _create_pilot(from_email, url, address, account['email'])
-        if pilot:
-            _log_audit('PILOT_CREATED', {
-                "pilot_id": pilot.get('id'),
-                "agent":    from_email,
-                "url":      url,
-                "address":  address,
-            })
-        _update_lead_status(from_email, 'pilot_pending_setup')
+        # Ask about CRM — pilot is confirmed manually by admin
+        reply_html = groq_reply or _tmpl_crm_ask()
+        _create_ops_ticket(from_email, subject, body_text, 'YES_CRM_PENDING',
+                           extra={'listing_url': url or '', 'address': address})
+        _log_audit('YES_CRM_PENDING', {
+            "from":    from_email,
+            "url":     url,
+            "address": address,
+            "account": account['email'],
+        })
+        _update_lead_status(from_email, 'crm_pending')
 
     elif intent == 'YES_NO_URL':
-        reply_html = groq_reply or _tmpl_yes_no_url()
-        _create_ops_ticket(from_email, subject, body_text, 'YES_AWAITING_LISTING')
-        _log_audit('YES_AWAITING_LISTING', {
-            "agent":   from_email,
+        # Ask about CRM — pilot is confirmed manually by admin
+        reply_html = groq_reply or _tmpl_crm_ask()
+        _create_ops_ticket(from_email, subject, body_text, 'YES_CRM_PENDING')
+        _log_audit('YES_CRM_PENDING', {
+            "from":    from_email,
             "account": account['email'],
             "subject": subject,
         })
-        _update_lead_status(from_email, 'awaiting_listing')
+        _update_lead_status(from_email, 'crm_pending')
+
+    elif intent == 'CRM_REPLY':
+        # Admin handles next step manually — no auto-reply sent
+        reply_html = None
+        _create_ops_ticket(from_email, subject, body_text, 'CRM_REPLY_RECEIVED')
+        _log_audit('CRM_REPLY_RECEIVED', {
+            "from":      from_email,
+            "reasoning": reasoning,
+            "snippet":   body_text[:300],
+            "account":   account['email'],
+        })
+        _update_lead_status(from_email, 'crm_known')
 
     elif intent == 'FORWARDED_LEAD':
         url        = extract_listing_url(body_text)
