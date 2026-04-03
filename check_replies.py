@@ -46,7 +46,7 @@ def get_access_token(encrypted_refresh_token: str) -> str | None:
         print(f"[TOKEN EXCEPTION] {e}")
         return None
 
-── Groq multi-key pool ───────────────────────────────────────────────────────
+#── Groq multi-key pool ───────────────────────────────────────────────────────
 def load_groq_keys() -> list[str]:
     keys = []
     base = os.environ.get('GROQ_API_KEY', '').strip()
