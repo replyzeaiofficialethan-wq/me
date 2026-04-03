@@ -64,14 +64,14 @@ def load_groq_keys() -> list[str]:
 GROQ_KEYS:    list[str] = load_groq_keys()
 _groq_cursor: int       = 0
 
-── UPDATED: two new intents added ────────────────────────────────────────────
+#── UPDATED: two new intents added ────────────────────────────────────────────
 _GROQ_VALID_INTENTS = {
     'YES_WITH_URL', 'YES_NO_URL', 'CRM_REPLY', 'FORWARDED_LEAD', 'ASKS_PRICE',
     'ASKS_DETAILS', 'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'QUESTION_OTHER',
     'ASKS_IDENTITY', 'ACKNOWLEDGMENT_ONLY', 'UNKNOWN'
 }
 
-── UPDATED: system prompt rewritten for CRM re-engagement product ─────────────
+#── UPDATED: system prompt rewritten for CRM re-engagement product ─────────────
 _GROQ_SYSTEM_PROMPT = """
 You are an intelligent reply analyzer for a real estate AI outreach system called ReplyzeAI.
 A real estate agent has replied to a cold outreach email. The email offered to re-engage
@@ -258,9 +258,9 @@ def _groq_classify_llm(text: str) -> str | None:
             continue
     return None
 
-══════════════════════════════════════════════════════════════════════════════
-URL / LISTING DETECTION
-══════════════════════════════════════════════════════════════════════════════
+#══════════════════════════════════════════════════════════════════════════════
+#URL / LISTING DETECTION
+#══════════════════════════════════════════════════════════════════════════════
 _LISTING_DOMAIN_RE = re.compile(
     r'https?://(?:www.)?'
     r'(?:'
@@ -369,7 +369,7 @@ _RE_CRM = re.compile(
     re.I
 )
 
-── NEW: identity question regex ──────────────────────────────────────────────
+#── NEW: identity question regex ──────────────────────────────────────────────
 _RE_IDENTITY = re.compile(
     r"\b(who are you|who is (this|katie|sending this)|what'?s your (last name|"
     r"full name|company|last|name)|who (sent|is) this|what company|"
@@ -379,7 +379,7 @@ _RE_IDENTITY = re.compile(
     re.I
 )
 
-── NEW: acknowledgment-only regex ─────────────────────────────────────────────
+#── NEW: acknowledgment-only regex ─────────────────────────────────────────────
 _RE_ACKNOWLEDGMENT = re.compile(
     r"^[\s\W]*(got\sit|ok|okay|k|noted|thanks|thank\syout|thx|ty| "
     r"will\sdo|roger|understood|acknowledged|👍|✓|✔|sounds\sgood| "
@@ -387,7 +387,7 @@ _RE_ACKNOWLEDGMENT = re.compile(
     re.I
 )
 
-── Intent classifier ─────────────────────────────────────────────────────────
+#── Intent classifier ─────────────────────────────────────────────────────────
 def classify_intent(text: str, groq_result: dict | None = None) -> str:
     """
     Uses the pre-fetched Groq analysis when available.
@@ -456,7 +456,7 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
 
     return 'UNKNOWN'
 
-── Auto-reply templates ──────────────────────────────────────────────────────
+#── Auto-reply templates ──────────────────────────────────────────────────────
 def _tmpl_crm_ask() -> str:
     return (
         "Quick question before I get everything set up — "
@@ -578,7 +578,7 @@ def _send_gmail_reply(account: dict, access_token: str,
         print(f"[REPLY SEND ERROR] {exc}")
         return False
 
-── Supabase helpers ──────────────────────────────────────────────────────────
+#── Supabase helpers ──────────────────────────────────────────────────────────
 def _is_processed(gmail_msg_id: str) -> bool:
     try:
         r = supabase.table("processed_replies") \
@@ -710,7 +710,7 @@ def _store_responded_lead(lead_id: int, email: str, intent: str, raw_reply: str)
     except:
         pass
 
-── Core message processor ────────────────────────────────────────────────────
+#── Core message processor ────────────────────────────────────────────────────
 def _process_one_message(account: dict, access_token: str, msg: dict):
     headers      = msg['payload']['headers']
     from_raw     = _get_header(headers, 'From')
@@ -920,7 +920,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         reasoning=reasoning,
     )
 
-── Per-account inbox scan ────────────────────────────────────────────────────
+#── Per-account inbox scan ────────────────────────────────────────────────────
 def _check_account(account: dict) -> int:
     access_token = get_access_token(account['encrypted_refresh_token'])
     if not access_token:
