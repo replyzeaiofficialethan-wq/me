@@ -10,12 +10,12 @@ from supabase import create_client
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 #from notify import notify  # ← ntfy.sh push notifications
 
-── Supabase ──────────────────────────────────────────────────────────────────
+#── Supabase ──────────────────────────────────────────────────────────────────
 SUPABASE_URL = os.environ['SUPABASE_URL']
 SUPABASE_KEY = os.environ['SUPABASE_SERVICE_ROLE_KEY']
 supabase     = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-── Encryption ────────────────────────────────────────────────────────────────
+#── Encryption ────────────────────────────────────────────────────────────────
 ENCRYPTION_KEY = bytes.fromhex(os.environ['ENCRYPTION_KEY'])
 
 def aesgcm_decrypt(b64text: str) -> str:
@@ -24,7 +24,7 @@ def aesgcm_decrypt(b64text: str) -> str:
     ct    = data[12:]
     return AESGCM(ENCRYPTION_KEY).decrypt(nonce, ct, None).decode('utf-8')
 
-── Gmail API ─────────────────────────────────────────────────────────────────
+#── Gmail API ─────────────────────────────────────────────────────────────────
 GOOGLE_TOKEN_URL     = "https://oauth2.googleapis.com/token"
 GOOGLE_CLIENT_ID     = os.environ.get('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
@@ -331,7 +331,7 @@ def extract_address_from_url(url: str | None) -> str:
             return part.replace('-', ' ').replace('_', ' ').title()
     return clean[:60]
 
-── Regex patterns ─────────────────────────────────────────────────────────────
+#── Regex patterns ─────────────────────────────────────────────────────────────
 _RE_PASS_STRICT = re.compile(r'^\s*pass[.!?\s]*$', re.I)
 _RE_PASS_LOOSE  = re.compile(
     r"\b(unsubscribe|opt.?out|remove me|take me off|stop emailing| "
@@ -532,7 +532,7 @@ def _tmpl_unknown() -> str:
         "I'll manually review and get back to you within 24 hours."
     )
 
-── Gmail helpers ─────────────────────────────────────────────────────────────
+#── Gmail helpers ─────────────────────────────────────────────────────────────
 def _get_header(headers: list, name: str) -> str:
     for h in headers:
         if h['name'].lower() == name.lower():
@@ -959,7 +959,7 @@ def _check_account(account: dict) -> int:
         print(f"  [ACCOUNT ERROR] {exc}")
         return 0
 
-── Entry point ───────────────────────────────────────────────────────────────
+#── Entry point ───────────────────────────────────────────────────────────────
 def check_all_replies():
     print("=" * 60)
     print("CHECK REPLIES  — Auto-reply worker")
