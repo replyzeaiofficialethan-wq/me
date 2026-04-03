@@ -1,5 +1,3 @@
-# check_replies.py  –  Auto-reply worker for cold outreach inbound replies
-
 import os
 import re
 import json
@@ -12,12 +10,12 @@ from supabase import create_client
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 #from notify import notify  # ← ntfy.sh push notifications
 
-# ── Supabase ──────────────────────────────────────────────────────────────────
+── Supabase ──────────────────────────────────────────────────────────────────
 SUPABASE_URL = os.environ['SUPABASE_URL']
 SUPABASE_KEY = os.environ['SUPABASE_SERVICE_ROLE_KEY']
 supabase     = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ── Encryption ────────────────────────────────────────────────────────────────
+── Encryption ────────────────────────────────────────────────────────────────
 ENCRYPTION_KEY = bytes.fromhex(os.environ['ENCRYPTION_KEY'])
 
 def aesgcm_decrypt(b64text: str) -> str:
@@ -26,7 +24,7 @@ def aesgcm_decrypt(b64text: str) -> str:
     ct    = data[12:]
     return AESGCM(ENCRYPTION_KEY).decrypt(nonce, ct, None).decode('utf-8')
 
-# ── Gmail API ─────────────────────────────────────────────────────────────────
+── Gmail API ─────────────────────────────────────────────────────────────────
 GOOGLE_TOKEN_URL     = "https://oauth2.googleapis.com/token"
 GOOGLE_CLIENT_ID     = os.environ.get('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
@@ -48,99 +46,130 @@ def get_access_token(encrypted_refresh_token: str) -> str | None:
         print(f"[TOKEN EXCEPTION] {e}")
         return None
 
-# ── Groq multi-key pool ───────────────────────────────────────────────────────
-def _load_groq_keys() -> list[str]:
+── Groq multi-key pool ───────────────────────────────────────────────────────
+def load_groq_keys() -> list[str]:
     keys = []
     base = os.environ.get('GROQ_API_KEY', '').strip()
     if base:
         keys.append(base)
     i = 1
     while True:
-        k = os.environ.get(f'GROQ_API_KEY_{i}', '').strip()
+        k = os.environ.get(f'GROQ_API_KEY{i}', '').strip()
         if not k:
             break
         keys.append(k)
         i += 1
     return keys
 
-GROQ_KEYS:    list[str] = _load_groq_keys()
+GROQ_KEYS:    list[str] = load_groq_keys()
 _groq_cursor: int       = 0
 
+── UPDATED: two new intents added ────────────────────────────────────────────
 _GROQ_VALID_INTENTS = {
     'YES_WITH_URL', 'YES_NO_URL', 'CRM_REPLY', 'FORWARDED_LEAD', 'ASKS_PRICE',
-    'ASKS_DETAILS', 'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'QUESTION_OTHER', 'UNKNOWN'
+    'ASKS_DETAILS', 'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'QUESTION_OTHER',
+    'ASKS_IDENTITY', 'ACKNOWLEDGMENT_ONLY', 'UNKNOWN'
 }
 
-_GROQ_SYSTEM_PROMPT = """\
+── UPDATED: system prompt rewritten for CRM re-engagement product ─────────────
+_GROQ_SYSTEM_PROMPT = """
 You are an intelligent reply analyzer for a real estate AI outreach system called ReplyzeAI.
+A real estate agent has replied to a cold outreach email. The email offered to re-engage
+their old/cold CRM leads — people who inquired before but went quiet — and book confirmed
+showings from that "dead" list. The pitch: we recently re-engaged 40 cold leads for a
+$1.5M listing and turned 8 into booked showings. We sync with their CRM in one click,
+no manual work required. We want to run a free small batch for them this week.
 
-A real estate agent has replied to a cold outreach email offering a FREE 14-day open house
-automation pilot. The original email offered to automatically qualify showings and book
-confirmed attendees for one of their open houses — guaranteed: if they don't get at least
-2 qualified showings booked automatically in 14 days, they owe nothing and keep the setup.
-Zero setup is required on the agent's end. Your job is to:
-1. READ and UNDERSTAND exactly what they are saying in their own words
-2. Classify their REAL intent — do NOT be fooled by email thread quotes
-3. Write a short, human, contextually appropriate reply
+Your job is to:
+READ and UNDERSTAND exactly what they are saying in their own words
+Classify their REAL intent — do NOT be fooled by email thread quotes
+Write a short, human, contextually appropriate reply
 
 INTENT LABELS (pick exactly one):
-- YES_WITH_URL       : They want to proceed AND included a listing or open house URL
-- YES_NO_URL         : They are interested / want to proceed, no listing URL yet
-- CRM_REPLY          : They are answering our question about which CRM they use —
-                       look for CRM names (Follow Up Boss, KvCore, Chime, BoomTown,
-                       Sierra, LionDesk, HubSpot, Salesforce, Lofty, CINC, etc.) or
-                       phrases like "we use X", "I'm on X", "my CRM is X", "don't use one"
-- FORWARDED_LEAD     : They GENUINELY forwarded a buyer inquiry — the email contains
-                       FULL email headers (From:, To:, Subject:, Date:) from a third party
-- ASKS_PRICE         : They are asking about pricing / cost after the pilot
-- ASKS_DETAILS       : They want to know how the system works
-- PASS_UNSUB         : They are politely declining or asking to be removed
-- NEGATIVE_OBJECTION : They are upset, frustrated, correcting wrong information,
-                       or angrily telling us to stop — NOT using formal unsubscribe language
-- QUESTION_OTHER     : A genuine question not covered above
-- UNKNOWN            : Cannot determine intent
+YES_WITH_URL       : They want to proceed AND included a listing or property URL
+YES_NO_URL         : They are interested / want to proceed, no listing URL yet
+CRM_REPLY          : They are answering our question about which CRM they use —
+                     look for CRM names (Follow Up Boss, KvCore, Chime, BoomTown,
+                     Sierra, LionDesk, HubSpot, Salesforce, Lofty, CINC, etc.) or
+                     phrases like "we use X", "I'm on X", "my CRM is X", "don't use one"
+FORWARDED_LEAD     : They GENUINELY forwarded a buyer inquiry — the email contains
+                     FULL email headers (From:, To:, Subject:, Date:) from a third party
+ASKS_PRICE         : They are asking about pricing / cost after the free batch
+ASKS_DETAILS       : They want to know how the re-engagement system works
+ASKS_IDENTITY      : They are asking WHO sent this — name, company, "who are you",
+                     "what's your last name", "who is this", "what company are you with",
+                     "are you a real person", "is this a bot". They are NOT upset —
+                     they are verifying before engaging. This is a POSITIVE signal.
+ACKNOWLEDGMENT_ONLY: A brief reply with no clear action or question — "got it", "ok",
+                     "thanks", "noted", short replies that are just a signature block,
+                     emoji-only replies, or "sounds good" with no follow-up question.
+                     Do NOT confuse with PASS_UNSUB. There is NO opt-out language here.
+PASS_UNSUB         : They are EXPLICITLY declining or asking to be removed. Must contain
+                     clear opt-out language: "not interested", "remove me", "stop emailing",
+                     "unsubscribe", "don't contact me", "no thanks", "please stop".
+                     A smiley face, "got it", or brief acknowledgment is NOT this.
+NEGATIVE_OBJECTION : Upset, frustrated, or angrily correcting us — wrong info about
+                     their closings/listings, thinks we're spam, telling us off.
+                     Must have a frustrated or hostile tone. "Who are you?" alone with
+                     a neutral tone is NOT this — that is ASKS_IDENTITY.
+QUESTION_OTHER     : A genuine question not covered above
+UNKNOWN            : Cannot determine intent
 
 CRITICAL RULES:
-- "On [date], [person] wrote:" at the bottom is just a quoted email thread — NOT a forwarded lead.
-  A real FORWARDED_LEAD contains the full inner email headers (From:, To:, Subject:, Date:) of
-  a THIRD PARTY (a buyer/client), not just the agent's own email thread history.
-- If the agent is angry, correcting bad info about their listings, or telling us off,
-  that is NEGATIVE_OBJECTION — handle it with empathy and a quick apology.
-- If they say they have listings under contract, do not want to be contacted, or think
-  our info is wrong → NEGATIVE_OBJECTION.
-- Only reply with apology/de-escalation for NEGATIVE_OBJECTION; never use a sales pitch.
+- "On [date], [person] wrote:" at the bottom is just a quoted email thread — NOT a forwarded
+  lead. A real FORWARDED_LEAD contains full inner email headers (From:, To:, Subject:, Date:)
+  of a THIRD PARTY (a buyer/client), not just the agent's own thread history.
+- If the agent is angry, correcting bad data about their closings, or telling us off →
+  NEGATIVE_OBJECTION. Handle with empathy and a brief apology. Never use a sales pitch.
+- "Who are you?" / "What's your last name?" with a neutral or curious tone → ASKS_IDENTITY.
+  Do not classify curiosity as hostility.
+- "Got it", "Thanks", "OK", a smiley face, or a signature-only reply → ACKNOWLEDGMENT_ONLY.
+  Do NOT classify as PASS_UNSUB unless they explicitly ask to be removed.
 
 REPLY TONE FOR YES_WITH_URL AND YES_NO_URL (CRITICAL):
-  Do NOT confirm the pilot or pitch anything. The ONLY goal is to find out what CRM they use.
-  Keep it to 2–3 lines max. Structure:
-    Acknowledge their YES warmly in one short sentence.
-    Ask: "Quick question before I get everything set up — which CRM do you use to manage your leads?"
-    Give 2–3 examples in parentheses: (Follow Up Boss, KvCore, HubSpot, etc.)
+Confirm momentum FIRST, then ask for CRM. Keep it to 2–3 lines max. Structure:
+1. Confirm action: "Got it — I'll run a small batch on your leads and report back with any qualified buyers ready to tour."
+2. Low-friction setup question: "Quick question so I configure it right — which CRM do you use? (Follow Up Boss, KvCore, HubSpot, etc.)"
+3. Reassurance: "One-click sync, zero manual work on your end."
+Do NOT sound like a form or an onboarding bot. Keep it conversational and forward-moving.
+
+REPLY TONE FOR ASKS_IDENTITY:
+They want to know who sent this before engaging. This is a GOOD sign — they're curious,
+not hostile. Do NOT apologize. Confidently introduce yourself:
+- Your first and last name
+- ReplyzeAI
+- One line on what we do: re-engage old CRM leads and turn them into booked showings
+- One soft re-invite: "Happy to answer any questions — want me to run a small test
+  batch on your leads?"
+Keep it to 3 lines max. Warm, confident, no sales pressure.
 
 REPLY TONE FOR CRM_REPLY:
-  Do NOT generate a reply — return an empty string for reply_html.
-  The admin will handle the next step manually.
+Do NOT generate a reply — return an empty string for reply_html.
+The admin will handle the next step manually.
+
+REPLY TONE FOR ACKNOWLEDGMENT_ONLY:
+Do NOT generate a reply — return an empty string for reply_html.
+They acknowledged but showed no intent. Replying risks annoyance.
 
 Respond ONLY with valid JSON (no markdown, no code fences):
 {
   "intent": "INTENT_LABEL",
   "reasoning": "1–2 sentence plain-English explanation of what the agent said",
   "reply_html": "Your reply — plain text, 2–3 sentences max, warm and human"
-}"""
-
+}
+"""
 
 def _groq_analyze_reply(text: str) -> dict | None:
     """
     Primary intelligence layer.
     Calls Groq to READ the reply, classify intent properly, and generate
     a contextually appropriate response. Returns:
-      { intent, reasoning, reply_html }
+    { intent, reasoning, reply_html }
     Returns None if all keys fail or the model returns unusable output.
     """
     global _groq_cursor
     if not GROQ_KEYS:
         return None
-
     for _ in range(len(GROQ_KEYS)):
         key = GROQ_KEYS[_groq_cursor % len(GROQ_KEYS)]
         _groq_cursor += 1
@@ -148,9 +177,9 @@ def _groq_analyze_reply(text: str) -> dict | None:
             resp = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {key}",
-                         "Content-Type": "application/json"},
+                         "Content-Type":  "application/json"},
                 json={
-                    "model": "llama-3.3-70b-versatile",
+                    "model":  "llama-3.3-70b-versatile",
                     "messages": [
                         {"role": "system", "content": _GROQ_SYSTEM_PROMPT},
                         {"role": "user",   "content": f"Analyze this reply:\n\n{text[:1200]}"},
@@ -166,7 +195,6 @@ def _groq_analyze_reply(text: str) -> dict | None:
                 try:
                     parsed = json.loads(raw)
                 except json.JSONDecodeError:
-                    # Strip possible stray fences and retry parse
                     cleaned = re.sub(r'^```[a-z]*\n?|```$', '', raw, flags=re.M).strip()
                     parsed  = json.loads(cleaned)
 
@@ -174,7 +202,7 @@ def _groq_analyze_reply(text: str) -> dict | None:
                 if intent in _GROQ_VALID_INTENTS:
                     return {
                         "intent":     intent,
-                        "reasoning":  parsed.get("reasoning",  "")[:500],
+                        "reasoning":  parsed.get("reasoning", "")[:500],
                         "reply_html": parsed.get("reply_html", "")[:1000],
                     }
                 print(f"[GROQ ANALYZE] unexpected intent: {intent!r}")
@@ -191,7 +219,6 @@ def _groq_analyze_reply(text: str) -> dict | None:
 
     return None
 
-
 # Legacy label-only fallback (used only when _groq_analyze_reply fails entirely)
 def _groq_classify_llm(text: str) -> str | None:
     global _groq_cursor
@@ -204,17 +231,18 @@ def _groq_classify_llm(text: str) -> str | None:
             resp = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {key}",
-                         "Content-Type": "application/json"},
+                         "Content-Type":  "application/json"},
                 json={
-                    "model": "llama-3.1-8b-instant",
+                    "model":  "llama-3.1-8b-instant",
                     "messages": [
                         {"role": "system", "content": (
-                            "You classify cold outreach reply intent for a real estate SaaS. "
+                            "You classify cold outreach reply intent for a real estate SaaS.  "
                             "Respond with EXACTLY one label and nothing else:\n"
-                            "YES_WITH_URL | YES_NO_URL | FORWARDED_LEAD | ASKS_PRICE | "
-                            "ASKS_DETAILS | PASS_UNSUB | NEGATIVE_OBJECTION | QUESTION_OTHER | UNKNOWN"
+                            "YES_WITH_URL | YES_NO_URL | FORWARDED_LEAD | ASKS_PRICE |  "
+                            "ASKS_DETAILS | ASKS_IDENTITY | ACKNOWLEDGMENT_ONLY |  "
+                            "PASS_UNSUB | NEGATIVE_OBJECTION | QUESTION_OTHER | UNKNOWN "
                         )},
-                        {"role": "user", "content": f"Classify:\n\n{text[:600]}"}
+                        {"role": "user",  "content": f"Classify:\n\n{text[:600]}"}
                     ],
                     "temperature": 0.0,
                     "max_tokens":  12,
@@ -230,184 +258,155 @@ def _groq_classify_llm(text: str) -> str | None:
             continue
     return None
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  URL / LISTING DETECTION
-#
-#  The key insight: any email signature can contain URLs (company website,
-#  Google Maps address link, LinkedIn, Calendly, etc.).  We must NOT fire
-#  YES_WITH_URL on those.
-#
-#  Rule: YES_WITH_URL only fires when the URL is on a known real-estate
-#  listing portal AND the path contains a property-level segment
-#  (e.g. /homes/, /listing/, /homedetails/, /p/co/…, /realestateandhomes-detail/).
-# ══════════════════════════════════════════════════════════════════════════════
-
-# Domains that host actual property listings
+══════════════════════════════════════════════════════════════════════════════
+URL / LISTING DETECTION
+══════════════════════════════════════════════════════════════════════════════
 _LISTING_DOMAIN_RE = re.compile(
-    r'https?://(?:www\.)?'
+    r'https?://(?:www.)?'
     r'(?:'
-    r'zillow\.com|realtor\.com|redfin\.com|trulia\.com|homes\.com|'
-    r'homesnap\.com|kw\.com|coldwellbanker\.com|compass\.com|'
-    r'sothebysrealty\.com|century21\.com|berkshirehathawayhs\.com|'
-    r'era\.com|movoto\.com|estately\.com|mlslistings\.com|'
-    r'matrix\.brightmls\.com|har\.com|mls\.com|homefinder\.com'
+    r'zillow.com|realtor.com|redfin.com|trulia.com|homes.com|'
+    r'homesnap.com|kw.com|coldwellbanker.com|compass.com|'
+    r'sothebysrealty.com|century21.com|berkshirehathawayhs.com|'
+    r'era.com|movoto.com|estately.com|mlslistings.com|'
+    r'matrix.brightmls.com|har.com|mls.com|homefinder.com'
     r')'
-    r'(?P<path>[^\s"\'<>]*)',   # capture the path for further validation
+    r'(?P<path>[^\s"<>]*)',
     re.I
 )
-
-# Path must contain one of these property-level segments
 _PROPERTY_PATH_RE = re.compile(
     r'/'
     r'(?:homes?|property|properties|listing(?:s)?|'
     r'realestateandhomes-detail|real-estate|'
     r'homedetails|for.?sale|buy|address|detail|'
-    r'p/[a-z]{2}/|'           # redfin  /p/co/denver/...
-    r'[a-z0-9\-]+-\d{5,}'     # slug ending in MLS/zip number
+    r'p/[a-z]{2}/|'
+    r'[a-z0-9-]+-\d{5,}'
     r')',
     re.I
 )
-
-# URLs that are never listing links (maps, social, tracking, brokerage homepages)
 _SKIP_URL_RE = re.compile(
-    r'https?://(?:www\.)?'
-    r'(?:maps\.google|maps\.apple|goo\.gl/maps|google\.com/maps|'
-    r'bing\.com/maps|mapquest\.com|'
-    r'linkedin\.com|facebook\.com|instagram\.com|twitter\.com|x\.com|'
-    r'youtube\.com|calendly\.com|zoom\.us|'
+    r'https?://(?:www.)?'
+    r'(?:maps.google|maps.apple|goo.gl/maps|google.com/maps|'
+    r'bing.com/maps|mapquest.com|'
+    r'linkedin.com|facebook.com|instagram.com|twitter.com|x.com|'
+    r'youtube.com|calendly.com|zoom.us|'
     r'hubspot|mailchimp|constantcontact|'
-    r'[a-z0-9\-]+\.com/unsubscribe|'
-    r'track\.|click\.|email\.|mg\.)',
+    r'[a-z0-9-]+.com/unsubscribe|'
+    r'track.|click.|email.|mg.)',
     re.I
 )
-
-_RE_HTTP = re.compile(r'https?://[^\s"\'<>]+', re.I)
-
+_RE_HTTP = re.compile(r'https?://[^\s"<>]+', re.I)
 
 def _find_listing_url(text: str) -> str | None:
-    """
-    Return the first URL that is definitely a property listing page.
-    Returns None if no such URL exists (including when only signature
-    / maps / brokerage homepage URLs are present).
-    """
     for m in _RE_HTTP.finditer(text):
         url = m.group(0).rstrip('.,;)>"\'')
-
-        # Hard skip — never a listing
         if _SKIP_URL_RE.match(url):
             continue
-
-        # Must be on a known listing domain
         domain_m = _LISTING_DOMAIN_RE.match(url)
         if not domain_m:
             continue
-
-        # Must have a property-level path segment
         path = domain_m.group('path')
         if _PROPERTY_PATH_RE.search(path):
             return url
-
     return None
-
 
 def extract_listing_url(text: str) -> str | None:
     return _find_listing_url(text)
 
-
 def extract_address_from_url(url: str | None) -> str:
-    """
-    Pull a human-readable address from a listing URL path.
-    NEVER reads query-string parameters — those produce garbage like ?Q=...
-    """
     if not url:
         return 'your listing'
-
-    # Strip query string and fragment entirely before parsing
     clean = re.sub(r'[?#].*$', '', url)
-
     path_m = re.search(
         r'/(?:homes?|property|properties|listing(?:s)?|'
         r'realestateandhomes-detail|real-estate|homedetails|'
         r'address|detail|p/[a-z]{2}/)/'
-        r'([a-z0-9][a-z0-9\-]+(?:-[a-z]{2}-\d{5})?)',
+        r'([a-z0-9][a-z0-9-]+(?:-[a-z]{2}-\d{5})?)',
         clean, re.I
     )
     if path_m:
         return path_m.group(1).replace('-', ' ').title()
-
-    # Fallback: path segment that has digits (address slug), no percent-encoding
     parts = clean.rstrip('/').split('/')
     for part in reversed(parts):
         if len(part) > 5 and re.search(r'\d', part) and '%' not in part:
             return part.replace('-', ' ').replace('_', ' ').title()
-
     return clean[:60]
 
-
-# ── Other regex patterns ──────────────────────────────────────────────────────
-# PASS — two-tier
+── Regex patterns ─────────────────────────────────────────────────────────────
 _RE_PASS_STRICT = re.compile(r'^\s*pass[.!?\s]*$', re.I)
 _RE_PASS_LOOSE  = re.compile(
-    r"\b(unsubscribe|opt.?out|remove me|take me off|stop emailing|"
-    r"stop contacting|don'?t (email|contact|message) me|"
+    r"\b(unsubscribe|opt.?out|remove me|take me off|stop emailing| "
+    r"stop contacting|don'?t (email|contact|message) me| "
     r"no longer (interested|want))\b",
     re.I
 )
 _RE_YES = re.compile(
-    r"\b(yes|yep|yeah|sure|count me in|i'?m in|let'?s do it|sounds good|"
-    r"i'?d like|interested|go ahead|please do|sign me up|i want|"
+    r"\b(yes|yep|yeah|sure|count me in|i'?m in|let'?s do it|sounds good| "
+    r"i'?d like|interested|go ahead|please do|sign me up|i want| "
     r"set it up|let'?s try|i'?ll do it|do it|great idea|love it)\b", re.I
 )
 _RE_PRICE = re.compile(
-    r"\b(price|cost|how much|charge|fee|pricing|rates?|plans?|"
+    r"\b(price|cost|how much|charge|fee|pricing|rates?|plans?| "
     r"subscription|payment|invoice)\b", re.I
 )
 _RE_DETAILS = re.compile(
-    r"\b(how does|how do|what is|what are|setup|smtp|login|dashboard|"
+    r"\b(how does|how do|what is|what are|setup|smtp|login|dashboard| "
     r"integrat|works?|explain|technical|details?|api|connect|plug.?in)\b", re.I
 )
-
 _RE_FORWARD = re.compile(
-    r"(------+\s*(forwarded message|original message)|"
+    r"(------+\s*(forwarded message|original message)| "
     r"begin forwarded message|\bfw[d]?:\b|on .+wrote:\s*\n)",
     re.I | re.MULTILINE
 )
 _RE_EMAIL_BLOCK = re.compile(
     r"(^from:\s.+\n(to|cc|subject|date):\s)", re.I | re.MULTILINE
 )
-
 _RE_CRM = re.compile(
-    r"\b(follow\s*up\s*boss|kvcore|kv\s*core|chime|boomtown|boom\s*town|"
-    r"sierra\s*interactive|liondesk|lion\s*desk|hubspot|salesforce|lofty|"
-    r"cinc|ylopo|propertybase|top\s*producer|wise\s*agent|real\s*geeks|"
-    r"contactually|zoho|monday\.?com|pipedrive|no\s*crm|don'?t\s*use\s*(a\s*)?crm|"
-    r"(we\s*(use|run|have)|i\s*use|i'?m\s*on|my\s*crm\s*is)\s+\w+)\b",
+    r"\b(follow\sup\sboss|kvcore|kv\score|chime|boomtown|boom\stown| "
+    r"sierra\sinteractive|liondesk|lion\sdesk|hubspot|salesforce|lofty| "
+    r"cinc|ylopo|propertybase|top\sproducer|wise\sagent|real\sgeeks| "
+    r"contactually|zoho|monday.?com|pipedrive|no\scrm|don'?t\suse\s(a\s*)?crm| "
+    r"(we\s*(use|run|have)|i\suse|i'?m\son|my\scrm\sis)\s+\w+)\b",
     re.I
 )
 
+── NEW: identity question regex ──────────────────────────────────────────────
+_RE_IDENTITY = re.compile(
+    r"\b(who are you|who is (this|katie|sending this)|what'?s your (last name|"
+    r"full name|company|last|name)|who (sent|is) this|what company|"
+    r"your (affiliation|last name|company)|are you (a real person|a bot|ai|"
+    r"human)|is this (a bot|ai|automated)|who am i (talking|speaking) to|"
+    r"what org(anization)?|who'?s (this|katie|sending))\b",
+    re.I
+)
 
-# ── Intent classifier ─────────────────────────────────────────────────────────
+── NEW: acknowledgment-only regex ─────────────────────────────────────────────
+_RE_ACKNOWLEDGMENT = re.compile(
+    r"^[\s\W]*(got\sit|ok|okay|k|noted|thanks|thank\syout|thx|ty| "
+    r"will\sdo|roger|understood|acknowledged|👍|✓|✔|sounds\sgood| "
+    r"appreciate\sit|great\sthanks|good\sto\sknow)[\s\W]*$",
+    re.I
+)
 
-# ── Intent classifier ─────────────────────────────────────────────────────────
-
+── Intent classifier ─────────────────────────────────────────────────────────
 def classify_intent(text: str, groq_result: dict | None = None) -> str:
     """
     Uses the pre-fetched Groq analysis when available.
     Falls back to regex rules only if Groq is unavailable.
-
     Priority when Groq is available:
       — Trust Groq's intent directly (it has read the full message)
       — Override only for YES_WITH_URL when a real listing URL is confirmed
 
     Priority when Groq is NOT available (regex-only fallback):
-      1. YES_WITH_URL   — listing URL on known portal with property path
-      2. FORWARDED_LEAD — forwarded email block with full inner headers only
-      3. ASKS_PRICE
-      4. YES_NO_URL     — positive signal, no listing URL
-      5. ASKS_DETAILS
-      6. PASS_UNSUB     — strict bare PASS or explicit opt-out language
-      7. UNKNOWN
+      1. YES_WITH_URL        — listing URL on known portal with property path
+      2. FORWARDED_LEAD      — forwarded email block with full inner headers only
+      3. ASKS_IDENTITY       — explicit "who are you" type questions
+      4. ACKNOWLEDGMENT_ONLY — bare acknowledgment with no action/question
+      5. CRM_REPLY           — CRM name or "I use X" phrasing
+      6. ASKS_PRICE
+      7. YES_NO_URL          — positive signal, no listing URL
+      8. ASKS_DETAILS
+      9. PASS_UNSUB          — strict bare PASS or explicit opt-out language
+      10. UNKNOWN
     """
     t = text.strip()
 
@@ -424,9 +423,17 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
         return 'YES_WITH_URL'
 
     # Only trigger FORWARDED_LEAD when there are FULL inner email headers
-    # (From: + To:/Subject:/Date: in block form) — not just "On X wrote:" thread quotes
     if _RE_EMAIL_BLOCK.search(t):
         return 'FORWARDED_LEAD'
+
+    if _RE_IDENTITY.search(t):
+        return 'ASKS_IDENTITY'
+
+    # Acknowledgment check — must match the whole reply (ignore quoted thread)
+    # Strip quoted thread lines before checking
+    stripped = re.sub(r'(?m)^>.*$', '', t).strip()
+    if _RE_ACKNOWLEDGMENT.match(stripped):
+        return 'ACKNOWLEDGMENT_ONLY'
 
     if _RE_CRM.search(t):
         return 'CRM_REPLY'
@@ -449,80 +456,74 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
 
     return 'UNKNOWN'
 
-
-# ── Auto-reply templates ──────────────────────────────────────────────────────
-
+── Auto-reply templates ──────────────────────────────────────────────────────
 def _tmpl_crm_ask() -> str:
     return (
-        "Sounds good — quick question before I get everything set up.<br><br>"
+        "Quick question before I get everything set up — "
         "Which CRM do you use to manage your leads? "
-        "(Follow Up Boss, KvCore, HubSpot, Salesforce, etc.)"
+        "(Follow Up Boss, KvCore, HubSpot, Salesforce, etc.) "
+        "We sync in one click so there's zero manual work on your end."
     )
 
-def _tmpl_yes_with_url(address: str, oh_date: str = 'TBD') -> str:
-    # Kept for manual reply template compatibility; auto-path now uses _tmpl_crm_ask()
+def _tmpl_asks_identity() -> str:
     return (
-        f"Perfect — starting the 14-day pilot on <strong>{address}</strong>.<br><br>"
-        "I'll qualify inbound inquiries and get confirmed showing bookings in front of you — "
-        "zero setup on your end.<br><br>"
-        "If you don't get at least 2 qualified showings booked automatically in 14 days, "
-        "you owe nothing and keep the setup.<br><br>"
-        f"Quick check: is the open house date/time {oh_date}? "
-        "Reply <strong>CONFIRM</strong> if correct or paste the right date/time."
+        "Hey — great question. I'm with ReplyzeAI. We re-engage old CRM leads "
+        "that have gone quiet and turn them into booked showings, syncing directly "
+        "with your CRM in one click. "
+        "Happy to answer any questions — want me to run a small test batch on your leads?"
     )
 
-def _tmpl_yes_no_url(listing_address: str = '') -> str:
-    # Kept for manual reply template compatibility; auto-path now uses _tmpl_crm_ask()
-    addr_line = (
-        f"Which open house do you want to run it on first — "
-        f"<strong>{listing_address}</strong>, or a different one?"
-        if listing_address
-        else "Which open house do you want to run it on?"
-    )
+def _tmpl_yes_with_url(address: str) -> str:
     return (
-        "Great.<br><br>"
-        f"{addr_line}<br><br>"
-        "Zero setup on your end — I handle everything. "
-        "If you don't get at least 2 qualified showings booked automatically in 14 days, "
-        "you owe nothing and keep the setup.<br><br>"
-        "Just reply with the address or paste the listing URL and I'll get it running."
+        f"Got it — I'll run a small batch around {address} and report back with any "
+        f"qualified buyers ready to tour.\n\n"
+        f"Quick question so I set it up right — which CRM do you use to manage leads? "
+        f"(Follow Up Boss, KvCore, HubSpot, etc.) One-click sync, zero manual work."
+    )
+
+def _tmpl_yes_no_url() -> str:
+    return (
+        "Got it — I'll run a small batch on your leads and report back with any "
+        "qualified buyers ready to tour.\n\n"
+        "Quick question so I set it up right — which CRM do you use to manage leads? "
+        "(Follow Up Boss, KvCore, HubSpot, etc.) One-click sync, zero manual work."
     )
 
 def _tmpl_forwarded_lead(address: str) -> str:
     return (
-        f"Got it — I received the forwarded lead for {address}. I'll reply in your voice "
-        "and report back with the response &amp; any confirmations. "
-        "Expect the first result shortly."
+        f"Got it — I received the forwarded lead for {address}. I'll reach out to them "
+        f"and report back with the response and any confirmed bookings. "
+        f"Expect the first update shortly."
     )
 
 def _tmpl_asks_price() -> str:
     return (
-        "Short answer — the pilot is completely free for 14 days. "
-        "If you don't get at least 2 qualified showings booked automatically, "
-        "you owe nothing and keep the setup.<br><br>"
-        "Reply <strong>PRICE</strong> if you want plan details after the pilot."
+        "The small batch pilot is completely free — no commitment. "
+        "If we don't re-engage any of your cold leads into booked showings, "
+        "you owe nothing. We only talk pricing once you've seen results first. "
+        "Want me to run the free batch this week?"
     )
 
 def _tmpl_asks_details() -> str:
     return (
-        "Good question — zero setup on your end, I handle everything.<br><br>"
-        "It qualifies inbound inquiries for your open house automatically and books "
-        "confirmed showings without you lifting a finger. 14-day free pilot, "
-        "2 qualified bookings guaranteed or you owe nothing.<br><br>"
-        "Reply <strong>SETUP</strong> to start, or "
-        "<strong>TECH</strong> for a one-paragraph technical breakdown."
+        "Good question — zero manual work on your end. "
+        "We pull your old/cold leads from your CRM (one-click sync), send them "
+        "a short personalised follow-up, qualify who's still interested, and book "
+        "confirmed showings directly onto your calendar. "
+        "We did this for a $1.5M listing — 40 dead leads, 8 booked showings. "
+        "Want me to run a free small batch for yours this week?"
     )
 
 def _tmpl_pass_unsub() -> str:
     return (
-        "Understood — you're unsubscribed. "
-        "If you change your mind any time, reply <strong>START</strong> and I'll re-open a slot."
+        "Understood — removing you from our list now. "
+        "You won't hear from us again. Best of luck with your listings!"
     )
 
 def _tmpl_negative_objection() -> str:
     return (
         "I apologize for the confusion — I clearly had incorrect information. "
-        "I'll correct my records right away and won't bother you again."
+        "I'll correct my records right away and won't reach out again."
     )
 
 def _tmpl_unknown() -> str:
@@ -531,9 +532,7 @@ def _tmpl_unknown() -> str:
         "I'll manually review and get back to you within 24 hours."
     )
 
-
-# ── Gmail helpers ─────────────────────────────────────────────────────────────
-
+── Gmail helpers ─────────────────────────────────────────────────────────────
 def _get_header(headers: list, name: str) -> str:
     for h in headers:
         if h['name'].lower() == name.lower():
@@ -571,7 +570,7 @@ def _send_gmail_reply(account: dict, access_token: str,
         resp = requests.post(
             "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
             headers={"Authorization": f"Bearer {access_token}",
-                     "Content-Type": "application/json"},
+                     "Content-Type":  "application/json"},
             json=payload, timeout=30,
         )
         return resp.status_code in (200, 201)
@@ -579,9 +578,7 @@ def _send_gmail_reply(account: dict, access_token: str,
         print(f"[REPLY SEND ERROR] {exc}")
         return False
 
-
-# ── Supabase helpers ──────────────────────────────────────────────────────────
-
+── Supabase helpers ──────────────────────────────────────────────────────────
 def _is_processed(gmail_msg_id: str) -> bool:
     try:
         r = supabase.table("processed_replies") \
@@ -617,6 +614,21 @@ def _log_audit(event_type: str, data: dict):
         }).execute()
     except Exception as exc:
         print(f"[AUDIT LOG ERROR] {exc}")
+
+def _log_agent_decision(from_email: str, intent: str, confidence: float,
+                        reasoning: str, metadata: dict):
+    """Log structured decision to agent_decisions table for audit trail."""
+    try:
+        supabase.table("agent_decisions").insert({
+            "email_from": from_email,
+            "agent_name":  "ClassifierAgent",
+            "decision":   intent,
+            "confidence": confidence,
+            "reasoning":  reasoning,
+            "metadata":   metadata,
+        }).execute()
+    except Exception as exc:
+        print(f"[AGENT DECISION LOG WARNING] {exc}")
 
 def _create_pilot(agent_email: str, listing_url: str | None,
                   address: str, from_account_email: str) -> dict | None:
@@ -655,8 +667,8 @@ def _handle_unsub(email: str):
     except:
         pass
 
-def _create_ops_ticket(from_email: str, subject: str, raw_body: str, intent: str,
-                       extra: dict | None = None):
+def create_ops_ticket(from_email: str, subject: str, raw_body: str, intent: str,
+                      extra: dict | None = None):
     try:
         row = {
             "from_email": from_email,
@@ -667,13 +679,24 @@ def _create_ops_ticket(from_email: str, subject: str, raw_body: str, intent: str
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         if extra:
-            # Merge extra fields into raw_body as a JSON appendix so they survive
-            # without schema changes — e.g. listing_url for YES_CRM_PENDING tickets
             import json as _json
-            row["raw_body"] = raw_body[:1800] + "\n\n__meta__:" + _json.dumps(extra)
+            row["raw_body"] = raw_body[:1800] + "\n\n__meta: " + _json.dumps(extra)
         supabase.table("ops_tickets").insert(row).execute()
     except Exception as exc:
         print(f"[OPS TICKET ERROR] {exc}")
+
+def _create_human_review_ticket(from_email: str, subject: str, raw_body: str,
+                                intent: str, reasoning: str):
+    """Queue low-confidence or UNKNOWN replies for human review."""
+    try:
+        supabase.table("human_review_queue").insert({
+            "email_from":     from_email,
+            "thread_data":    {"subject": subject, "body": raw_body[:1000]},
+            "agent_decisions": {"intent": intent, "reasoning": reasoning},
+            "status":         "pending",
+        }).execute()
+    except Exception as exc:
+        print(f"[HUMAN REVIEW QUEUE WARNING] {exc}")
 
 def _store_responded_lead(lead_id: int, email: str, intent: str, raw_reply: str):
     try:
@@ -687,9 +710,7 @@ def _store_responded_lead(lead_id: int, email: str, intent: str, raw_reply: str)
     except:
         pass
 
-
-# ── Core message processor ────────────────────────────────────────────────────
-
+── Core message processor ────────────────────────────────────────────────────
 def _process_one_message(account: dict, access_token: str, msg: dict):
     headers      = msg['payload']['headers']
     from_raw     = _get_header(headers, 'From')
@@ -697,7 +718,6 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     orig_msg_id  = _get_header(headers, 'Message-ID')
     gmail_msg_id = msg['id']
     thread_id    = msg.get('threadId')
-
     em_match   = re.search(r'<([^>]+)>', from_raw)
     from_email = (em_match.group(1) if em_match else from_raw).lower().strip()
 
@@ -734,7 +754,17 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     intent = classify_intent(body_text, groq_result)
     print(f"  [{from_email}] intent={intent}")
 
-    reasoning = groq_result.get("reasoning", "") if groq_result else ""
+    reasoning  = groq_result.get("reasoning", "") if groq_result else ""
+    confidence = 0.9 if groq_result else 0.5
+
+    # ── Structured agent decision log ─────────────────────────────────────────
+    _log_agent_decision(
+        from_email=from_email,
+        intent=intent,
+        confidence=confidence,
+        reasoning=reasoning,
+        metadata=groq_result or {},
+    )
 
     _log_audit('REPLY_RECEIVED', {
         "from":         from_email,
@@ -754,10 +784,9 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     if intent == 'YES_WITH_URL':
         url        = extract_listing_url(body_text)
         address    = extract_address_from_url(url)
-        # Ask about CRM — pilot is confirmed manually by admin
-        reply_html = groq_reply or _tmpl_crm_ask()
-        _create_ops_ticket(from_email, subject, body_text, 'YES_CRM_PENDING',
-                           extra={'listing_url': url or '', 'address': address})
+        reply_html  = groq_reply or _tmpl_yes_with_url(address)
+        create_ops_ticket(from_email, subject, body_text, 'YES_CRM_PENDING',
+                          extra={'listing_url': url or '', 'address': address})
         _log_audit('YES_CRM_PENDING', {
             "from":    from_email,
             "url":     url,
@@ -767,9 +796,8 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _update_lead_status(from_email, 'crm_pending')
 
     elif intent == 'YES_NO_URL':
-        # Ask about CRM — pilot is confirmed manually by admin
-        reply_html = groq_reply or _tmpl_crm_ask()
-        _create_ops_ticket(from_email, subject, body_text, 'YES_CRM_PENDING')
+        reply_html = groq_reply or _tmpl_yes_no_url()
+        create_ops_ticket(from_email, subject, body_text, 'YES_CRM_PENDING')
         _log_audit('YES_CRM_PENDING', {
             "from":    from_email,
             "account": account['email'],
@@ -779,8 +807,8 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
 
     elif intent == 'CRM_REPLY':
         # Admin handles next step manually — no auto-reply sent
-        reply_html = None
-        _create_ops_ticket(from_email, subject, body_text, 'CRM_REPLY_RECEIVED')
+        reply_html = None 
+        create_ops_ticket(from_email, subject, body_text, 'CRM_REPLY_RECEIVED')
         _log_audit('CRM_REPLY_RECEIVED', {
             "from":      from_email,
             "reasoning": reasoning,
@@ -798,7 +826,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
             try:
                 supabase.table("pilots").update({
                     "transcripts": [{
-                        "type":      "buyer",
+                        "type":       "buyer",
                         "raw":       body_text[:2000],
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }]
@@ -810,6 +838,24 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
                 "agent":    from_email,
             })
         _update_lead_status(from_email, 'pilot_pending_setup')
+
+    elif intent == 'ASKS_IDENTITY':
+        # They want to know who sent this — confirm identity confidently, no apology
+        reply_html = groq_reply or _tmpl_asks_identity()
+        _log_audit('ASKS_IDENTITY', {
+            "from":      from_email,
+            "reasoning": reasoning,
+            "account":   account['email'],
+        })
+
+    elif intent == 'ACKNOWLEDGMENT_ONLY':
+        # Brief ack with no action — do NOT reply, let follow-up sequence handle it
+        reply_html = None
+        _log_audit('ACKNOWLEDGMENT_ONLY', {
+            "from":      from_email,
+            "reasoning": reasoning,
+            "account":   account['email'],
+        })
 
     elif intent == 'ASKS_PRICE':
         reply_html = groq_reply or _tmpl_asks_price()
@@ -823,7 +869,6 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _log_audit('UNSUBSCRIBED', {"email": from_email})
 
     elif intent == 'NEGATIVE_OBJECTION':
-        # Groq should always have a reply here; fall back to generic apology
         reply_html = groq_reply or _tmpl_negative_objection()
         # Mark do-not-contact — they clearly don't want outreach
         _handle_unsub(from_email)
@@ -834,16 +879,17 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         })
 
     else:
+        # UNKNOWN or QUESTION_OTHER — queue for human review
         reply_html = groq_reply or _tmpl_unknown()
-        _create_ops_ticket(from_email, subject, body_text, intent)
+        create_ops_ticket(from_email, subject, body_text, intent)
+        _create_human_review_ticket(from_email, subject, body_text, intent, reasoning)
         _log_audit('OPS_TICKET_CREATED', {"from": from_email, "intent": intent})
 
-   
-    # ───────────────────────────────────────────────────────────────────────────
+    # ── Step 4: Send reply ─────────────────────────────────────────────────────
 
     auto_reply_sent = False
     if reply_html:
-        ok = _send_gmail_reply(account, access_token,
+        ok = _send_gmail_reply(account, access_token, 
                                from_email, subject, reply_html,
                                thread_id, orig_msg_id)
         auto_reply_sent = ok
@@ -851,11 +897,11 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         if ok:
             print(f"  [SENT] Auto-reply → {from_email} ({intent})")
             _log_audit('AUTO_REPLY_SENT', {
-                "to":           from_email,
-                "intent":       intent,
-                "reasoning":    reasoning,
-                "auto_reply":   reply_html[:300],
-                "account":      account['email'],
+                "to":         from_email,
+                "intent":     intent,
+                "reasoning":  reasoning,
+                "auto_reply": reply_html[:300],
+                "account":    account['email'],
             })
             _store_responded_lead(lead['id'], from_email, intent, body_text)
         else:
@@ -865,7 +911,6 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
                 "intent":  intent,
                 "account": account['email'],
             })
-            
 
     _mark_processed(
         gmail_msg_id, account['email'], from_email,
@@ -875,9 +920,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         reasoning=reasoning,
     )
 
-
-# ── Per-account inbox scan ────────────────────────────────────────────────────
-
+── Per-account inbox scan ────────────────────────────────────────────────────
 def _check_account(account: dict) -> int:
     access_token = get_access_token(account['encrypted_refresh_token'])
     if not access_token:
@@ -916,16 +959,13 @@ def _check_account(account: dict) -> int:
         print(f"  [ACCOUNT ERROR] {exc}")
         return 0
 
-
-# ── Entry point ───────────────────────────────────────────────────────────────
-
+── Entry point ───────────────────────────────────────────────────────────────
 def check_all_replies():
     print("=" * 60)
     print("CHECK REPLIES  — Auto-reply worker")
     print(f"UTC: {datetime.now(timezone.utc).isoformat()}")
     print(f"Groq keys loaded: {len(GROQ_KEYS)}"
           + (" (regex-only mode)" if not GROQ_KEYS else ""))
-
     accounts = supabase.table("gmail_accounts") \
         .select("*").eq("gmail_connected", True).execute()
 
@@ -939,9 +979,6 @@ def check_all_replies():
 
     print("\n" + "=" * 60)
     print(f"DONE  total_processed={total}")
-
-    
-
 
 if __name__ == "__main__":
     check_all_replies()
