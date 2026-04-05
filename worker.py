@@ -42,6 +42,34 @@
 #       count        INT         NOT NULL DEFAULT 0,
 #       UNIQUE (window_start)
 #   );
+#
+# ── FIX: REQUIRED SQL FUNCTIONS (run once in Supabase SQL editor) ─────────────
+#
+#   -- 1. Atomic hourly counter increment (fixes race condition in increment_hourly_count)
+#   CREATE OR REPLACE FUNCTION increment_hourly_count(p_window TIMESTAMPTZ, p_by INT)
+#   RETURNS void LANGUAGE sql AS $$
+#     INSERT INTO hourly_email_counts (window_start, count)
+#     VALUES (p_window, p_by)
+#     ON CONFLICT (window_start)
+#     DO UPDATE SET count = hourly_email_counts.count + p_by;
+#   $$;
+#
+#   -- 2. Atomic claim + stale-release in one query (fixes race window in claim_emails)
+#   CREATE OR REPLACE FUNCTION claim_emails(p_limit INT, p_now TIMESTAMPTZ, p_stale TIMESTAMPTZ)
+#   RETURNS SETOF email_queue LANGUAGE sql AS $$
+#     UPDATE email_queue SET claimed_at = NULL
+#     WHERE sent_at IS NULL AND claimed_at IS NOT NULL AND claimed_at < p_stale;
+#
+#     UPDATE email_queue SET claimed_at = p_now
+#     WHERE id IN (
+#       SELECT id FROM email_queue
+#       WHERE sent_at IS NULL AND claimed_at IS NULL AND scheduled_for <= p_now
+#       ORDER BY scheduled_for
+#       LIMIT p_limit
+#       FOR UPDATE SKIP LOCKED
+#     )
+#     RETURNING *;
+#   $$;
 
 import os
 import base64
@@ -186,75 +214,50 @@ def get_hourly_sent_count() -> int:
         return 0
 
 
+# FIX: replaced non-atomic read-modify-write with a single atomic SQL upsert via RPC.
+# Two concurrent workers previously both read the same count, each added 1, and both
+# wrote back the same value — effectively counting only one send instead of two.
+# The SQL function uses INSERT ... ON CONFLICT DO UPDATE SET count = count + p_by
+# which is evaluated atomically by Postgres, so concurrent calls can never collide.
+# Make sure you have created the `increment_hourly_count` SQL function (see header).
 def increment_hourly_count(by: int = 1):
-    """Atomically increment the hourly counter (upsert pattern)."""
+    """Atomically increment the hourly counter via a Postgres upsert function."""
     window = current_hour_window()
     try:
-        existing = supabase.table("hourly_email_counts") \
-            .select("id, count") \
-            .eq("window_start", window) \
-            .execute()
-
-        if existing.data:
-            new_count = existing.data[0]["count"] + by
-            supabase.table("hourly_email_counts") \
-                .update({"count": new_count}) \
-                .eq("window_start", window) \
-                .execute()
-        else:
-            supabase.table("hourly_email_counts") \
-                .insert({"window_start": window, "count": by}) \
-                .execute()
+        supabase.rpc("increment_hourly_count", {
+            "p_window": window,
+            "p_by":     by,
+        }).execute()
     except Exception as e:
         print(f"[HOURLY INCREMENT ERROR] {e}")
 
 
 # ── Claim lock ────────────────────────────────────────────────────────────────
+# FIX: replaced two-step fetch-then-update with a single atomic SQL function via RPC.
+# The old approach had a race window: two concurrent workers could both SELECT the same
+# unclaimed rows and then both UPDATE claimed_at on those same IDs — causing duplicate
+# sends. The SQL function uses FOR UPDATE SKIP LOCKED, which is Postgres's native
+# row-level advisory lock that guarantees each row is claimed by exactly one caller.
+# Make sure you have created the `claim_emails` SQL function (see header).
 def claim_emails(limit: int) -> list:
     """
     Fetch and atomically claim unsent emails due now.
 
-    Sets claimed_at = now() on the selected rows BEFORE processing so that
-    a second concurrent worker (external cron overlap) won't pick the same
-    emails. Emails where claimed_at is set but sent_at is still NULL for
-    more than 10 minutes are considered stale and released back into the pool.
+    Uses a single Postgres function with FOR UPDATE SKIP LOCKED so that
+    concurrent workers can never claim the same row. Stale claims (worker
+    crashed mid-batch, claimed_at set > 10 min ago with no sent_at) are
+    released in the same atomic call.
     """
-    now = datetime.now(timezone.utc)
+    now             = datetime.now(timezone.utc)
     stale_threshold = (now - timedelta(minutes=10)).isoformat()
 
-    # Release stale claims (worker crashed mid-batch)
     try:
-        supabase.table("email_queue") \
-            .update({"claimed_at": None}) \
-            .is_("sent_at", "null") \
-            .lt("claimed_at", stale_threshold) \
-            .execute()
-    except Exception as e:
-        print(f"[STALE RELEASE ERROR] {e}")
-
-    # Fetch unclaimed emails due now
-    try:
-        queued = supabase.table("email_queue") \
-            .select("*") \
-            .is_("sent_at", "null") \
-            .is_("claimed_at", "null") \
-            .lte("scheduled_for", now.isoformat()) \
-            .limit(limit) \
-            .execute()
-
-        if not queued.data:
-            return []
-
-        ids = [q["id"] for q in queued.data]
-
-        # Claim them
-        supabase.table("email_queue") \
-            .update({"claimed_at": now.isoformat()}) \
-            .in_("id", ids) \
-            .execute()
-
-        return queued.data
-
+        result = supabase.rpc("claim_emails", {
+            "p_limit": limit,
+            "p_now":   now.isoformat(),
+            "p_stale": stale_threshold,
+        }).execute()
+        return result.data if result.data else []
     except Exception as e:
         print(f"[CLAIM ERROR] {e}")
         return []
@@ -371,8 +374,12 @@ def replace_urls_with_tracking(html_content, lead_id, campaign_id,
 
 
 # ── Follow-up scheduler ────────────────────────────────────────────────────────
+# FIX: now reads send_delay_seconds and send_jitter_seconds from the campaign row
+# and applies them to the scheduled_for timestamp. Previously the function computed
+# send_date as exactly now + days_after_previous with no randomisation, so every
+# follow-up fired at the exact same second regardless of campaign jitter settings.
 def schedule_followup(q: dict, sequence: int, account_email: str):
-    """Queue the next follow-up for this lead/campaign."""
+    """Queue the next follow-up for this lead/campaign, with delay + jitter applied."""
     try:
         fu = supabase.table("campaign_followups") \
             .select("*") \
@@ -387,19 +394,37 @@ def schedule_followup(q: dict, sequence: int, account_email: str):
         lead = supabase.table("leads") \
             .select("*").eq("id", q["lead_id"]).single().execute()
 
-        if lead.data:
-            send_date = (datetime.now(timezone.utc)
-                         + timedelta(days=fu["days_after_previous"]))
+        if not lead.data:
+            return
 
-            supabase.table("email_queue").insert({
-                "campaign_id":   q["campaign_id"],
-                "lead_id":       q["lead_id"],
-                "lead_email":    q["lead_email"],
-                "subject":       render_email_template(fu["subject"], lead.data),
-                "body":          render_email_template(fu["body"],    lead.data),
-                "sequence":      sequence,
-                "scheduled_for": send_date.isoformat(),
-            }).execute()
+        # Fetch campaign-level send pacing settings
+        camp = supabase.table("campaigns") \
+            .select("send_delay_seconds, send_jitter_seconds") \
+            .eq("id", q["campaign_id"]) \
+            .single() \
+            .execute()
+
+        delay  = int((camp.data or {}).get("send_delay_seconds") or 0)
+        jitter = int((camp.data or {}).get("send_jitter_seconds") or 0)
+        # Apply a random offset within [0, jitter] so each follow-up gets a
+        # unique scheduled_for rather than all firing at the same second.
+        offset_seconds = delay + (random.randint(0, jitter) if jitter > 0 else 0)
+
+        send_date = (
+            datetime.now(timezone.utc)
+            + timedelta(days=fu["days_after_previous"])
+            + timedelta(seconds=offset_seconds)
+        )
+
+        supabase.table("email_queue").insert({
+            "campaign_id":   q["campaign_id"],
+            "lead_id":       q["lead_id"],
+            "lead_email":    q["lead_email"],
+            "subject":       render_email_template(fu["subject"], lead.data),
+            "body":          render_email_template(fu["body"],    lead.data),
+            "sequence":      sequence,
+            "scheduled_for": send_date.isoformat(),
+        }).execute()
 
     except Exception as e:
         print(f"[FOLLOWUP ERROR] seq={sequence}: {e}")
@@ -547,7 +572,7 @@ def send_queued():
 
                 # NOTE: No time.sleep() here.
                 # Rate limiting is enforced by:
-                #   1. MAX_EMAILS_PER_HOUR  — global hourly budget (DB-tracked)
+                #   1. MAX_EMAILS_PER_HOUR  — global hourly budget (DB-tracked, now atomic)
                 #   2. MAX_EMAILS_PER_RUN   — per-run cap
                 #   3. scheduled_for        — campaign creation staggers timestamps
                 #                             so future runs pick up the next batch
