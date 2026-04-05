@@ -23,6 +23,11 @@
 #   -- Also add gmail_account column to lead_campaign_accounts:
 #   ALTER TABLE lead_campaign_accounts
 #     ADD COLUMN IF NOT EXISTS gmail_account TEXT;
+#
+# FIX: add delay/jitter columns to campaigns table (run once):
+#   ALTER TABLE campaigns
+#     ADD COLUMN IF NOT EXISTS send_delay_seconds  INT NOT NULL DEFAULT 0,
+#     ADD COLUMN IF NOT EXISTS send_jitter_seconds INT NOT NULL DEFAULT 0;
 
 import os
 import base64
@@ -417,12 +422,17 @@ def api_create_campaign():
     try:
         data = request.get_json(force=True)
 
+        # FIX: save send_delay_seconds and send_jitter_seconds to the campaigns row.
+        # Previously these fields were silently dropped here even if the frontend sent
+        # them, so the worker and queue functions could never read them back.
         result = supabase.table("campaigns").insert({
-            "name":             data.get('name'),
-            "subject":          data.get('subject'),
-            "body":             data.get('body'),
-            "list_name":        data.get('list_name'),
-            "send_immediately": data.get('send_immediately', False),
+            "name":                 data.get('name'),
+            "subject":              data.get('subject'),
+            "body":                 data.get('body'),
+            "list_name":            data.get('list_name'),
+            "send_immediately":     data.get('send_immediately', False),
+            "send_delay_seconds":   int(data.get('send_delay_seconds') or 0),
+            "send_jitter_seconds":  int(data.get('send_jitter_seconds') or 0),
         }).execute()
 
         if getattr(result, "error", None):
@@ -445,8 +455,21 @@ def api_create_campaign():
                 .select("*").eq("list_name", data.get('list_name')).execute()
 
             if leads.data:
+                # FIX: stagger scheduled_for per lead using delay + jitter.
+                # Previously every lead in the batch got the exact same
+                # scheduled_for = now(), so all emails fired simultaneously
+                # regardless of what delay/jitter was configured.
+                delay  = int(campaign.get('send_delay_seconds') or 0)
+                jitter = int(campaign.get('send_jitter_seconds') or 0)
+                now    = datetime.now(timezone.utc)
+
                 queue = []
-                for lead in leads.data:
+                for idx, lead in enumerate(leads.data):
+                    # Each lead gets its own unique send time:
+                    #   base offset = idx * delay (spreads them out evenly)
+                    #   + random jitter within [0, jitter] (avoids sending in lockstep)
+                    offset = (idx * delay) + (random.randint(0, jitter) if jitter > 0 else 0)
+                    scheduled = now + timedelta(seconds=offset)
                     queue.append({
                         "campaign_id":   campaign_id,
                         "lead_id":       lead['id'],
@@ -454,7 +477,7 @@ def api_create_campaign():
                         "subject":       render_email_template(data.get('subject', ''), lead),
                         "body":          render_email_template(data.get('body', ''),    lead),
                         "sequence":      0,
-                        "scheduled_for": datetime.now(timezone.utc).isoformat(),
+                        "scheduled_for": scheduled.isoformat(),
                     })
 
                 for i in range(0, len(queue), 100):
@@ -497,11 +520,18 @@ def api_queue_followup():
         if not leads.data:
             return jsonify({"ok": True, "queued": 0}), 200
 
-        send_date = datetime.now(timezone.utc) + timedelta(
+        # FIX: stagger scheduled_for per lead using the campaign's delay/jitter settings.
+        # Previously a single send_date was computed once and reused for every lead,
+        # so the entire follow-up batch would land in the worker at the same second.
+        delay  = int(campaign.data.get('send_delay_seconds') or 0)
+        jitter = int(campaign.data.get('send_jitter_seconds') or 0)
+        base   = datetime.now(timezone.utc) + timedelta(
             days=follow_up.data['days_after_previous'])
-        queue = []
 
-        for lead in leads.data:
+        queue = []
+        for idx, lead in enumerate(leads.data):
+            offset    = (idx * delay) + (random.randint(0, jitter) if jitter > 0 else 0)
+            scheduled = base + timedelta(seconds=offset)
             queue.append({
                 "campaign_id":   campaign_id,
                 "lead_id":       lead['id'],
@@ -509,7 +539,7 @@ def api_queue_followup():
                 "subject":       render_email_template(follow_up.data['subject'], lead),
                 "body":          render_email_template(follow_up.data['body'],    lead),
                 "sequence":      sequence,
-                "scheduled_for": send_date.isoformat(),
+                "scheduled_for": scheduled.isoformat(),
             })
 
         total = 0
@@ -903,19 +933,21 @@ def api_record_ai_usage():
         if not lead.data:
             return jsonify({"error": "Lead not found"}), 404
 
-        email    = lead.data['email']
-        existing = supabase.table("ai_demo_usage").select("*").eq("email", email).execute()
+        email = lead.data['email']
+        existing = supabase.table("ai_demo_usage").select("id, use_count") \
+            .eq("email", email).execute()
 
         if existing.data:
             supabase.table("ai_demo_usage").update({
-                "usage_count": existing.data[0]['usage_count'] + 1,
-                "last_used_at": datetime.now(timezone.utc).isoformat()
+                "use_count":   existing.data[0]['use_count'] + 1,
+                "last_used_at": datetime.now(timezone.utc).isoformat(),
             }).eq("email", email).execute()
         else:
             supabase.table("ai_demo_usage").insert({
-                "lead_id": lead_id, "email": email, "usage_count": 1,
-                "first_used_at": datetime.now(timezone.utc).isoformat(),
-                "last_used_at":  datetime.now(timezone.utc).isoformat(),
+                "email":       email,
+                "lead_id":     lead_id,
+                "use_count":   1,
+                "last_used_at": datetime.now(timezone.utc).isoformat(),
             }).execute()
 
         return jsonify({"ok": True}), 200
