@@ -3,9 +3,16 @@ import re
 import json
 import base64
 import time
+import hashlib
+import imaplib
+import smtplib
+import email as email_lib
+import email.utils
+import email.header
 import requests
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from supabase import create_client
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 #from notify import notify  # ← ntfy.sh push notifications
@@ -578,6 +585,320 @@ def _send_gmail_reply(account: dict, access_token: str,
         print(f"[REPLY SEND ERROR] {exc}")
         return False
 
+#── SMTP reply sender ─────────────────────────────────────────────────────────
+def _send_smtp_reply(account: dict, to_email: str, subject: str,
+                     html_body: str, orig_message_id: str | None,
+                     references: str | None) -> bool:
+    """Send an auto-reply via SMTP with proper In-Reply-To/References threading."""
+    try:
+        smtp_password = aesgcm_decrypt(account['encrypted_smtp_password'])
+        reply_subject = subject if subject.lower().startswith('re:') else f"Re: {subject}"
+
+        msg            = MIMEMultipart('alternative')
+        msg['Subject'] = reply_subject
+        msg['From']    = f"{account.get('display_name', account['email'])} <{account['email']}>"
+        msg['To']      = to_email
+        if orig_message_id:
+            msg['In-Reply-To'] = orig_message_id
+            refs = f"{references} {orig_message_id}".strip() if references else orig_message_id
+            msg['References']  = refs
+
+        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+
+        with smtplib.SMTP(account['smtp_host'], int(account.get('smtp_port', 587)),
+                          timeout=30) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(account['smtp_username'], smtp_password)
+            server.send_message(msg)
+
+        return True
+    except Exception as exc:
+        print(f"[SMTP REPLY ERROR] {exc}")
+        return False
+
+
+#── IMAP helpers ──────────────────────────────────────────────────────────────
+def _imap_connect(account: dict):
+    """Return an authenticated, INBOX-selected IMAP4_SSL connection."""
+    smtp_password = aesgcm_decrypt(account['encrypted_smtp_password'])
+    imap_host     = account.get('imap_host') or account['smtp_host']
+    imap_port     = int(account.get('imap_port') or 993)
+    mail = imaplib.IMAP4_SSL(imap_host, imap_port)
+    mail.login(account['smtp_username'], smtp_password)
+    mail.select('INBOX')
+    return mail
+
+
+def _decode_imap_header(raw: str) -> str:
+    """Decode RFC-2047 encoded email header value."""
+    parts = []
+    for chunk, charset in email.header.decode_header(raw or ''):
+        if isinstance(chunk, bytes):
+            parts.append(chunk.decode(charset or 'utf-8', errors='replace'))
+        else:
+            parts.append(chunk)
+    return ''.join(parts)
+
+
+def _extract_plain_text_imap(msg) -> str:
+    """Walk a parsed email.message.Message and return the first text/plain body."""
+    if msg.is_multipart():
+        for part in msg.walk():
+            if (part.get_content_type() == 'text/plain'
+                    and 'attachment' not in str(part.get('Content-Disposition', ''))):
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or 'utf-8'
+                    return payload.decode(charset, errors='replace')
+    else:
+        payload = msg.get_payload(decode=True)
+        if payload:
+            charset = msg.get_content_charset() or 'utf-8'
+            return payload.decode(charset, errors='replace')
+    return ''
+
+
+def _process_one_imap_message(account: dict, raw_bytes: bytes):
+    """
+    Parse a raw RFC822 message fetched from IMAP and run it through
+    the same Groq → intent → auto-reply pipeline used for Gmail messages.
+    """
+    msg = email_lib.message_from_bytes(raw_bytes)
+
+    from_raw    = _decode_imap_header(msg.get('From', ''))
+    subject     = _decode_imap_header(msg.get('Subject', ''))
+    orig_msg_id = (msg.get('Message-ID') or '').strip()
+    references  = (msg.get('References') or '').strip()
+
+    em_match   = re.search(r'<([^>]+)>', from_raw)
+    from_email = (em_match.group(1) if em_match else from_raw).lower().strip()
+
+    # Skip messages we sent
+    if from_email == account['email'].lower():
+        return
+
+    # Build a stable dedup key — use Message-ID if present, else hash the body preview
+    if not orig_msg_id:
+        preview    = _extract_plain_text_imap(msg)[:200].encode()
+        orig_msg_id = f"<imap-{hashlib.md5(preview).hexdigest()}@local>"
+
+    if _is_processed(orig_msg_id):
+        return
+
+    lead_r = supabase.table('leads') \
+                 .select('id,email,name,do_not_contact') \
+                 .eq('email', from_email).execute()
+    if not lead_r.data:
+        _mark_processed(orig_msg_id, account['email'], from_email, 'NOT_A_LEAD', False)
+        return
+
+    lead = lead_r.data[0]
+    if lead.get('do_not_contact'):
+        _mark_processed(orig_msg_id, account['email'], from_email, 'DO_NOT_CONTACT', False)
+        return
+
+    body_text = _extract_plain_text_imap(msg)
+    if not body_text.strip():
+        return
+
+    # ── Step 1: Groq analyze ──────────────────────────────────────────────────
+    print(f"  [{from_email}] calling Groq analyze (IMAP) …")
+    groq_result = _groq_analyze_reply(body_text)
+    if groq_result:
+        print(f"  [{from_email}] Groq → intent={groq_result['intent']} "
+              f"reasoning={groq_result['reasoning'][:80]}")
+    else:
+        print(f"  [{from_email}] Groq unavailable — falling back to regex classifier")
+
+    # ── Step 2: Final intent ──────────────────────────────────────────────────
+    intent     = classify_intent(body_text, groq_result)
+    reasoning  = groq_result.get('reasoning', '') if groq_result else ''
+    confidence = 0.9 if groq_result else 0.5
+    print(f"  [{from_email}] intent={intent}")
+
+    _log_agent_decision(
+        from_email=from_email, intent=intent, confidence=confidence,
+        reasoning=reasoning, metadata=groq_result or {},
+    )
+
+    _log_audit('REPLY_RECEIVED', {
+        'from':        from_email,
+        'subject':     subject,
+        'intent':      intent,
+        'reasoning':   reasoning,
+        'raw_snippet': body_text[:300],
+        'imap_msg_id': orig_msg_id,
+        'account':     account['email'],
+        'channel':     'smtp_imap',
+    })
+
+    # ── Step 3: Choose reply (mirrors Gmail path exactly) ─────────────────────
+    groq_reply          = (groq_result or {}).get('reply_html', '').strip()
+    reply_html: str | None = None
+
+    if intent == 'YES_WITH_URL':
+        url        = extract_listing_url(body_text)
+        address    = extract_address_from_url(url)
+        reply_html = groq_reply or _tmpl_yes_with_url(address)
+        create_ops_ticket(from_email, subject, body_text, 'YES_CRM_PENDING',
+                          extra={'listing_url': url or '', 'address': address})
+        _log_audit('YES_CRM_PENDING', {
+            'from': from_email, 'url': url, 'address': address, 'account': account['email'],
+        })
+        _update_lead_status(from_email, 'crm_pending')
+
+    elif intent == 'YES_NO_URL':
+        reply_html = groq_reply or _tmpl_yes_no_url()
+        create_ops_ticket(from_email, subject, body_text, 'YES_CRM_PENDING')
+        _log_audit('YES_CRM_PENDING', {
+            'from': from_email, 'account': account['email'], 'subject': subject,
+        })
+        _update_lead_status(from_email, 'crm_pending')
+
+    elif intent == 'CRM_REPLY':
+        reply_html = None
+        create_ops_ticket(from_email, subject, body_text, 'CRM_REPLY_RECEIVED')
+        _log_audit('CRM_REPLY_RECEIVED', {
+            'from': from_email, 'reasoning': reasoning,
+            'snippet': body_text[:300], 'account': account['email'],
+        })
+        _update_lead_status(from_email, 'crm_known')
+
+    elif intent == 'FORWARDED_LEAD':
+        url        = extract_listing_url(body_text)
+        address    = extract_address_from_url(url)
+        reply_html = groq_reply or _tmpl_forwarded_lead(address)
+        pilot      = _create_pilot(from_email, url, address, account['email'])
+        if pilot:
+            try:
+                supabase.table('pilots').update({
+                    'transcripts': [{'type': 'buyer', 'raw': body_text[:2000],
+                                     'timestamp': datetime.now(timezone.utc).isoformat()}]
+                }).eq('id', pilot['id']).execute()
+            except:
+                pass
+            _log_audit('FORWARDED_LEAD_ATTACHED', {
+                'pilot_id': pilot.get('id'), 'agent': from_email,
+            })
+        _update_lead_status(from_email, 'pilot_pending_setup')
+
+    elif intent == 'ASKS_IDENTITY':
+        reply_html = groq_reply or _tmpl_asks_identity()
+        _log_audit('ASKS_IDENTITY', {
+            'from': from_email, 'reasoning': reasoning, 'account': account['email'],
+        })
+
+    elif intent == 'ACKNOWLEDGMENT_ONLY':
+        reply_html = None
+        _log_audit('ACKNOWLEDGMENT_ONLY', {
+            'from': from_email, 'reasoning': reasoning, 'account': account['email'],
+        })
+
+    elif intent == 'ASKS_PRICE':
+        reply_html = groq_reply or _tmpl_asks_price()
+
+    elif intent == 'ASKS_DETAILS':
+        reply_html = groq_reply or _tmpl_asks_details()
+
+    elif intent == 'PASS_UNSUB':
+        reply_html = groq_reply or _tmpl_pass_unsub()
+        _handle_unsub(from_email)
+        _log_audit('UNSUBSCRIBED', {'email': from_email})
+
+    elif intent == 'NEGATIVE_OBJECTION':
+        reply_html = groq_reply or _tmpl_negative_objection()
+        _handle_unsub(from_email)
+        _log_audit('NEGATIVE_OBJECTION', {
+            'from': from_email, 'reasoning': reasoning, 'account': account['email'],
+        })
+
+    else:
+        reply_html = groq_reply or _tmpl_unknown()
+        create_ops_ticket(from_email, subject, body_text, intent)
+        _create_human_review_ticket(from_email, subject, body_text, intent, reasoning)
+        _log_audit('OPS_TICKET_CREATED', {'from': from_email, 'intent': intent})
+
+    # ── Step 4: Send reply via SMTP ───────────────────────────────────────────
+    auto_reply_sent = False
+    if reply_html:
+        ok = _send_smtp_reply(account, from_email, subject,
+                              reply_html, orig_msg_id, references)
+        auto_reply_sent = ok
+
+        if ok:
+            print(f"  [SENT] SMTP auto-reply → {from_email} ({intent})")
+            _log_audit('AUTO_REPLY_SENT', {
+                'to': from_email, 'intent': intent, 'reasoning': reasoning,
+                'auto_reply': reply_html[:300], 'account': account['email'],
+                'channel': 'smtp',
+            })
+            _store_responded_lead(lead['id'], from_email, intent, body_text)
+        else:
+            print(f"  [FAILED] SMTP auto-reply → {from_email}")
+            _log_audit('AUTO_REPLY_FAILED', {
+                'to': from_email, 'intent': intent, 'account': account['email'],
+            })
+
+    _mark_processed(
+        orig_msg_id, account['email'], from_email,
+        intent, auto_reply_sent,
+        raw_reply=body_text,
+        auto_reply_body=reply_html or '',
+        reasoning=reasoning,
+    )
+
+
+def _check_imap_account(account: dict) -> int:
+    """
+    Connect to the IMAP inbox for one smtp_accounts row, fetch UNSEEN
+    messages, and run each through the auto-reply pipeline.
+    Returns the number of messages processed.
+    """
+    if not account.get('imap_host'):
+        print(f"  [SKIP] No imap_host configured for {account['email']}")
+        return 0
+
+    try:
+        mail = _imap_connect(account)
+    except Exception as exc:
+        print(f"  [IMAP CONNECT ERROR] {account['email']}: {exc}")
+        return 0
+
+    try:
+        status, data = mail.search(None, 'UNSEEN')
+        if status != 'OK':
+            print(f"  [IMAP SEARCH ERROR] {status}")
+            return 0
+
+        uids = data[0].split()
+        print(f"  Unread IMAP messages: {len(uids)}")
+        processed = 0
+
+        for uid in uids:
+            try:
+                status2, msg_data = mail.fetch(uid, '(RFC822)')
+                if status2 != 'OK' or not msg_data or not msg_data[0]:
+                    continue
+                _process_one_imap_message(account, msg_data[0][1])
+                processed += 1
+            except Exception as exc:
+                print(f"  [IMAP PROCESS ERROR] uid={uid}: {exc}")
+            time.sleep(1)
+
+        mail.logout()
+        return processed
+
+    except Exception as exc:
+        print(f"  [IMAP ACCOUNT ERROR] {account['email']}: {exc}")
+        try:
+            mail.logout()
+        except:
+            pass
+        return 0
+
+
 #── Supabase helpers ──────────────────────────────────────────────────────────
 def _is_processed(gmail_msg_id: str) -> bool:
     try:
@@ -966,14 +1287,28 @@ def check_all_replies():
     print(f"UTC: {datetime.now(timezone.utc).isoformat()}")
     print(f"Groq keys loaded: {len(GROQ_KEYS)}"
           + (" (regex-only mode)" if not GROQ_KEYS else ""))
-    accounts = supabase.table("gmail_accounts") \
+
+    total = 0
+
+    # ── 1. Gmail OAuth accounts ───────────────────────────────────────────────
+    gmail_accounts = supabase.table("gmail_accounts") \
         .select("*").eq("gmail_connected", True).execute()
 
-    print(f"Gmail accounts to check: {len(accounts.data)}")
-    total = 0
-    for acct in accounts.data:
-        print(f"\n── {acct['email']} ──────────────")
+    print(f"\nGmail accounts to check: {len(gmail_accounts.data)}")
+    for acct in gmail_accounts.data:
+        print(f"\n── [Gmail] {acct['email']} ──────────────")
         n      = _check_account(acct)
+        total += n
+        print(f"  Processed {n} message(s)")
+
+    # ── 2. SMTP / IMAP accounts ───────────────────────────────────────────────
+    smtp_rows    = supabase.table("smtp_accounts").select("*").execute()
+    imap_accounts = [a for a in smtp_rows.data if a.get("imap_host")]
+
+    print(f"\nSMTP/IMAP accounts to check: {len(imap_accounts)}")
+    for acct in imap_accounts:
+        print(f"\n── [IMAP] {acct['email']} ──────────────")
+        n      = _check_imap_account(acct)
         total += n
         print(f"  Processed {n} message(s)")
 
