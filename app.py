@@ -23,11 +23,6 @@
 #   -- Also add gmail_account column to lead_campaign_accounts:
 #   ALTER TABLE lead_campaign_accounts
 #     ADD COLUMN IF NOT EXISTS gmail_account TEXT;
-#
-# FIX: add delay/jitter columns to campaigns table (run once):
-#   ALTER TABLE campaigns
-#     ADD COLUMN IF NOT EXISTS send_delay_seconds  INT NOT NULL DEFAULT 0,
-#     ADD COLUMN IF NOT EXISTS send_jitter_seconds INT NOT NULL DEFAULT 0;
 
 import os
 import base64
@@ -38,8 +33,12 @@ import csv
 import io
 import re
 import random
+import smtplib
+import imaplib
 import requests
 import urllib.parse
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText as _MIMEText
 from datetime import datetime, timedelta, timezone, date
 from flask import (Flask, request, redirect, render_template,
                    jsonify, current_app, url_for)
@@ -279,7 +278,7 @@ def auth_gmail_callback():
         "gmail_connected":         True,
     }, on_conflict="email").execute()
 
-    return redirect("/admin?oauth_success=1")
+    return redirect("https://www.replyzeai.com/goods/admin?oauth_success=1")
 
 
 # ── Gmail accounts API ────────────────────────────────────────────────────────
@@ -406,6 +405,185 @@ def api_get_account_status():
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
 
+# ── SMTP / IMAP accounts — list ───────────────────────────────────────────────
+
+@app.route('/api/smtp-accounts', methods=['GET'])
+def api_get_smtp_accounts():
+    try:
+        rows = supabase.table("smtp_accounts") \
+            .select("id, email, display_name, smtp_host, smtp_port, smtp_username, imap_host, imap_port, created_at") \
+            .order("created_at") \
+            .execute()
+        return jsonify({"ok": True, "accounts": rows.data}), 200
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+# ── SMTP / IMAP accounts — add ────────────────────────────────────────────────
+
+@app.route('/api/smtp-accounts', methods=['POST'])
+def api_add_smtp_account():
+    """
+    Save SMTP credentials encrypted. Does NOT run a live connection test on
+    save — call /test explicitly after saving. This prevents hosting firewalls
+    from blocking the outbound SMTP port and causing false 500 errors.
+    """
+    try:
+        body = request.get_json(force=True) or {}
+
+        email         = (body.get("email") or "").strip().lower()
+        display_name  = (body.get("display_name") or "").strip() or email
+        smtp_host     = (body.get("smtp_host") or "").strip()
+        smtp_port_raw = body.get("smtp_port")
+        smtp_port     = int(smtp_port_raw) if smtp_port_raw else 587
+        smtp_username = (body.get("smtp_username") or "").strip()
+        smtp_password = (body.get("smtp_password") or "")
+        imap_host     = (body.get("imap_host") or "").strip() or None
+        imap_port_raw = body.get("imap_port")
+        imap_port     = int(imap_port_raw) if (imap_host and imap_port_raw) else (993 if imap_host else None)
+
+        if not email or not smtp_host or not smtp_username or not smtp_password:
+            return jsonify({
+                "error": "missing_fields",
+                "detail": "email, smtp_host, smtp_username and smtp_password are all required"
+            }), 400
+
+        try:
+            validate_email(email, check_deliverability=False)
+        except EmailNotValidError as ve:
+            return jsonify({"error": "invalid_email", "detail": str(ve)}), 400
+
+        encrypted_pw = aesgcm_encrypt(smtp_password)
+
+        supabase.table("smtp_accounts").upsert({
+            "email":                    email,
+            "display_name":             display_name,
+            "smtp_host":                smtp_host,
+            "smtp_port":                smtp_port,
+            "smtp_username":            smtp_username,
+            "encrypted_smtp_password":  encrypted_pw,
+            "imap_host":                imap_host,
+            "imap_port":                imap_port,
+        }, on_conflict="email").execute()
+
+        return jsonify({"ok": True, "test_ok": None,
+                        "message": "Account saved. Click Test to verify the connection."}), 200
+
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+# ── SMTP / IMAP accounts — delete ─────────────────────────────────────────────
+
+@app.route('/api/smtp-accounts/<int:account_id>', methods=['DELETE'])
+def api_delete_smtp_account(account_id):
+    try:
+        acct = supabase.table("smtp_accounts") \
+            .select("id, email").eq("id", account_id).single().execute()
+        if not acct.data:
+            return jsonify({"error": "not_found"}), 404
+        supabase.table("smtp_accounts").delete().eq("id", account_id).execute()
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+# ── SMTP / IMAP accounts — test ───────────────────────────────────────────────
+
+@app.route('/api/smtp-accounts/<int:account_id>/test', methods=['POST'])
+def api_test_smtp_account(account_id):
+    """
+    Test SMTP credentials by sending a real email via plain SMTP (smtplib).
+    Works for all providers including smtp2go — always uses the SMTP protocol,
+    never the smtp2go HTTP REST API.
+    """
+    try:
+        acct = supabase.table("smtp_accounts") \
+            .select("*").eq("id", account_id).single().execute()
+        if not acct.data:
+            return jsonify({"error": "not_found"}), 404
+
+        a        = acct.data
+        password = aesgcm_decrypt(a["encrypted_smtp_password"])
+        port     = int(a.get("smtp_port") or 587)
+
+        # ── plain SMTP socket (works for all providers incl. smtp2go) ────
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = "[ReplyzeAI] SMTP connection test"
+            msg["From"]    = "{} <{}>".format(a["display_name"], a["email"])
+            msg["To"]      = a["email"]
+            msg.attach(_MIMEText(
+                "<p>&#x2705; <strong>ReplyzeAI SMTP test passed!</strong><br>"
+                "Account <code>{}</code> is connected and sending correctly.</p>".format(a["email"]),
+                "html", "utf-8"
+            ))
+
+            if port == 465:
+                server = smtplib.SMTP_SSL(a["smtp_host"], port, timeout=20)
+            else:
+                server = smtplib.SMTP(a["smtp_host"], port, timeout=20)
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+
+            server.login(a["smtp_username"], password)
+            server.sendmail(a["email"], [a["email"]], msg.as_string())
+            server.quit()
+            return jsonify({"ok": True,
+                            "message": "Test email sent to {}".format(a["email"])}), 200
+
+        except smtplib.SMTPAuthenticationError as auth_err:
+            return jsonify({"error": "auth_failed",
+                            "detail": "Wrong username or password — {}".format(str(auth_err))}), 400
+        except (smtplib.SMTPConnectError, ConnectionRefusedError, OSError) as conn_err:
+            return jsonify({
+                "error": "connection_failed",
+                "detail": (
+                    "Cannot reach {}:{} from this server — your hosting platform likely blocks "
+                    "outbound SMTP ports (587/465). This is normal. Your worker.py running on "
+                    "GitHub Actions is NOT affected and will send fine. "
+                    "Raw error: {}".format(a["smtp_host"], port, str(conn_err))
+                )
+            }), 400
+        except smtplib.SMTPException as smtp_err:
+            return jsonify({"error": "smtp_error", "detail": str(smtp_err)}), 400
+
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+# ── SMTP send helper (use in worker.py) ──────────────────────────────────────
+
+def send_via_smtp(smtp_acct, to_email, subject, html_body, from_name=None):
+    """
+    Send one email via SMTP. smtp_acct must be a row dict from smtp_accounts.
+    Raises smtplib exceptions on failure — caller should catch and log.
+    Compatible with Python 3.8+.
+    """
+    password    = aesgcm_decrypt(smtp_acct["encrypted_smtp_password"])
+    sender_name = from_name or smtp_acct.get("display_name") or smtp_acct["email"]
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = "{} <{}>".format(sender_name, smtp_acct["email"])
+    msg["To"]      = to_email
+    msg.attach(_MIMEText(html_body, "html", "utf-8"))
+
+    port = int(smtp_acct.get("smtp_port") or 587)
+    if port == 465:
+        server = smtplib.SMTP_SSL(smtp_acct["smtp_host"], port, timeout=30)
+    else:
+        server = smtplib.SMTP(smtp_acct["smtp_host"], port, timeout=30)
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+
+    server.login(smtp_acct["smtp_username"], password)
+    server.sendmail(smtp_acct["email"], [to_email], msg.as_string())
+    server.quit()
+
+
 # ── Campaigns ─────────────────────────────────────────────────────────────────
 @app.route('/api/campaigns', methods=['GET'])
 def api_get_campaigns():
@@ -417,22 +595,314 @@ def api_get_campaigns():
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
 
 
+@app.route('/api/campaigns/<int:campaign_id>/stats', methods=['GET'])
+def api_campaign_stats(campaign_id):
+    """Aggregate delivery, engagement and reply stats for a single campaign."""
+    try:
+        # ── Campaign + follow-ups ─────────────────────────────────────────
+        campaign_res = supabase.table("campaigns") \
+            .select("*").eq("id", campaign_id).single().execute()
+        if not campaign_res.data:
+            return jsonify({"error": "not_found"}), 404
+
+        followups_res = supabase.table("campaign_followups") \
+            .select("*").eq("campaign_id", campaign_id) \
+            .order("sequence").execute()
+
+        # ── Email queue ───────────────────────────────────────────────────
+        queue_res = supabase.table("email_queue") \
+            .select("id,sequence,sent_at,scheduled_for,lead_email,sent_from") \
+            .eq("campaign_id", campaign_id).execute()
+        queue = queue_res.data or []
+
+        total_queued  = len(queue)
+        total_sent    = sum(1 for e in queue if e.get('sent_at'))
+        total_pending = sum(1 for e in queue if not e.get('sent_at'))
+
+        # Per-sequence breakdown
+        by_seq = {}
+        for e in queue:
+            seq = e.get('sequence', 0)
+            if seq not in by_seq:
+                by_seq[seq] = {'queued': 0, 'sent': 0}
+            by_seq[seq]['queued'] += 1
+            if e.get('sent_at'):
+                by_seq[seq]['sent'] += 1
+
+        # Unique leads & sending accounts
+        unique_leads    = len(set(e['lead_email'] for e in queue if e.get('lead_email')))
+        sending_accounts = list(set(e['sent_from'] for e in queue if e.get('sent_from')))
+
+        # First / last send timestamps
+        sent_times = [e['sent_at'] for e in queue if e.get('sent_at')]
+        first_sent = min(sent_times) if sent_times else None
+        last_sent  = max(sent_times) if sent_times else None
+
+        # ── Link clicks ───────────────────────────────────────────────────
+        clicks_res = supabase.table("link_clicks") \
+            .select("id,lead_id,clicked_at,action_type") \
+            .eq("campaign_id", campaign_id).execute()
+        clicks = clicks_res.data or []
+        total_clicks    = len(clicks)
+        unique_clickers = len(set(c['lead_id'] for c in clicks if c.get('lead_id')))
+
+        # ── Lead activity (responses tied to campaign) ────────────────────
+        activity_res = supabase.table("lead_activity") \
+            .select("id,action_type") \
+            .eq("campaign_id", campaign_id).execute()
+        activity    = activity_res.data or []
+        total_responses = sum(1 for a in activity if a.get('action_type') == 'responded')
+
+        return jsonify({
+            "ok": True,
+            "campaign":   campaign_res.data,
+            "follow_ups": followups_res.data or [],
+            "stats": {
+                "total_queued":      total_queued,
+                "total_sent":        total_sent,
+                "total_pending":     total_pending,
+                "unique_leads":      unique_leads,
+                "total_clicks":      total_clicks,
+                "unique_clickers":   unique_clickers,
+                "total_responses":   total_responses,
+                "first_sent":        first_sent,
+                "last_sent":         last_sent,
+                "sending_accounts":  sending_accounts,
+                "by_sequence":       by_seq,
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
+@app.route('/api/campaigns/<int:campaign_id>/diagnose', methods=['POST'])
+def api_campaign_diagnose(campaign_id):
+    """
+    Pulls all campaign context from Supabase, then calls Groq to produce
+    an AI diagnosis. GROQ_API_KEY is read from the environment — never
+    exposed to the frontend.
+    """
+    groq_key = os.environ.get('GROQ_API_KEY', '')
+    if not groq_key:
+        return jsonify({"error": "GROQ_API_KEY not configured on server"}), 500
+
+    try:
+        # ── Campaign + follow-ups ────────────────────────────────────────
+        campaign_res = supabase.table("campaigns") \
+            .select("*").eq("id", campaign_id).single().execute()
+        if not campaign_res.data:
+            return jsonify({"error": "not_found"}), 404
+        campaign = campaign_res.data
+
+        followups_res = supabase.table("campaign_followups") \
+            .select("*").eq("campaign_id", campaign_id) \
+            .order("sequence").execute()
+        follow_ups = followups_res.data or []
+
+        # ── Queue stats ──────────────────────────────────────────────────
+        queue_res = supabase.table("email_queue") \
+            .select("id,sequence,sent_at,scheduled_for,lead_email,sent_from") \
+            .eq("campaign_id", campaign_id).execute()
+        queue = queue_res.data or []
+
+        total_queued   = len(queue)
+        total_sent     = sum(1 for e in queue if e.get('sent_at'))
+        total_pending  = sum(1 for e in queue if not e.get('sent_at'))
+        unique_leads   = len(set(e['lead_email'] for e in queue if e.get('lead_email')))
+        sending_accounts = list(set(e['sent_from'] for e in queue if e.get('sent_from')))
+        sent_times     = [e['sent_at'] for e in queue if e.get('sent_at')]
+        first_sent     = min(sent_times) if sent_times else None
+        last_sent      = max(sent_times) if sent_times else None
+
+        by_seq = {}
+        for e in queue:
+            seq = e.get('sequence', 0)
+            if seq not in by_seq:
+                by_seq[seq] = {'queued': 0, 'sent': 0}
+            by_seq[seq]['queued'] += 1
+            if e.get('sent_at'):
+                by_seq[seq]['sent'] += 1
+
+        # ── Clicks ───────────────────────────────────────────────────────
+        clicks_res = supabase.table("link_clicks") \
+            .select("id,lead_id,clicked_at") \
+            .eq("campaign_id", campaign_id).execute()
+        clicks          = clicks_res.data or []
+        total_clicks    = len(clicks)
+        unique_clickers = len(set(c['lead_id'] for c in clicks if c.get('lead_id')))
+
+        # ── Replies from lead_activity ───────────────────────────────────
+        activity_res = supabase.table("lead_activity") \
+            .select("id,action_type") \
+            .eq("campaign_id", campaign_id).execute()
+        activity        = activity_res.data or []
+        total_responses = sum(1 for a in activity if a.get('action_type') == 'responded')
+
+        # ── Historical reply rate for this list ──────────────────────────
+        list_leads_res = supabase.table("leads") \
+            .select("id,responded") \
+            .eq("list_name", campaign['list_name']).execute()
+        list_leads     = list_leads_res.data or []
+        list_total     = len(list_leads)
+        list_responded = sum(1 for l in list_leads if l.get('responded'))
+
+        # ── Sending account daily usage ──────────────────────────────────
+        account_usage = []
+        for acct in sending_accounts[:5]:  # cap to avoid too many queries
+            today = datetime.now(timezone.utc).date().isoformat()
+            usage_res = supabase.table("daily_email_counts") \
+                .select("count,date") \
+                .eq("email_account", acct) \
+                .order("date", desc=True).limit(7).execute()
+            account_usage.append({
+                "account": acct,
+                "recent_days": usage_res.data or []
+            })
+
+        # ── Does the body contain any links? ────────────────────────────
+        body_text      = campaign.get('body', '')
+        has_links      = bool(re.search(r'https?://', body_text))
+        link_count     = len(re.findall(r'https?://\S+', body_text))
+
+        # ── Does subject look spammy? (basic heuristics) ────────────────
+        subject        = campaign.get('subject', '')
+        spam_words     = ['free','guarantee','no risk','limited time','act now',
+                          'click here','winner','congratulations','urgent']
+        subject_flags  = [w for w in spam_words if w.lower() in subject.lower()]
+        all_caps_words = len(re.findall(r'\b[A-Z]{3,}\b', subject))
+
+        # ── Build prompt ─────────────────────────────────────────────────
+        send_rate  = round(total_sent / total_queued * 100, 1) if total_queued else 0
+        click_rate = round(unique_clickers / total_sent * 100, 2) if total_sent else 0
+        reply_rate = round(total_responses / total_sent * 100, 2) if total_sent else 0
+        hist_rate  = round(list_responded / list_total * 100, 2) if list_total else 0
+
+        seq_lines = '\n'.join(
+            f"  Seq {'Initial' if k == 0 else '#'+str(k)}: "
+            f"{v['sent']}/{v['queued']} sent "
+            f"({round(v['sent']/v['queued']*100,1) if v['queued'] else 0}%)"
+            for k, v in sorted(by_seq.items())
+        )
+
+        account_lines = ''
+        for au in account_usage:
+            days = ', '.join(f"{d['date']}:{d['count']}" for d in au['recent_days'][:3])
+            account_lines += f"  {au['account']}: {days or 'no data'}\n"
+
+        # ── Compute send window duration ─────────────────────────────────
+        send_window_minutes = None
+        if first_sent and last_sent:
+            try:
+                fmt = '%Y-%m-%dT%H:%M:%S'
+                t1 = datetime.fromisoformat(first_sent.replace('Z', '+00:00'))
+                t2 = datetime.fromisoformat(last_sent.replace('Z', '+00:00'))
+                send_window_minutes = round((t2 - t1).total_seconds() / 60, 1)
+            except Exception:
+                pass
+
+        prompt = f"""You are a senior cold email strategist who diagnoses campaign failures at the architectural level — not just the symptom level.
+
+Your job is to identify the ROOT CAUSE chain: why did this campaign structurally fail, and how do the individual problems compound each other? Do not produce a checklist of isolated issues. Connect the dots.
+
+═══ CAMPAIGN DATA ═══════════════════════════════════════════════
+Name:         {campaign['name']}
+Lead list:    {campaign['list_name']}
+Subject line: {subject}
+Body:
+{body_text[:800]}{'...[truncated]' if len(body_text) > 800 else ''}
+
+Follow-ups configured: {len(follow_ups)}
+{chr(10).join(f"  Follow-up #{f['sequence']}: +{f['days_after_previous']}d — subject: {f['subject']}" for f in follow_ups) if follow_ups else '  (none — single-shot campaign)'}
+Send delay: {campaign.get('send_delay_seconds', 0)}s ± {campaign.get('send_jitter_seconds', 0)}s jitter
+
+═══ DELIVERY ════════════════════════════════════════════════════
+Total sent:    {total_sent} of {total_queued} queued ({send_rate}% server-acceptance rate)
+Send window:   {f'{send_window_minutes} minutes total ({round(total_sent/send_window_minutes,1) if send_window_minutes and send_window_minutes > 0 else "?"} emails/min)' if send_window_minutes is not None else 'unknown'}
+First sent:    {first_sent or 'N/A'}
+Last sent:     {last_sent or 'N/A'}
+Sending accounts: {', '.join(sending_accounts) or 'unknown'}
+Daily usage (last 3 days per account):
+{account_lines.strip() or '  (no data)'}
+
+Sequence breakdown:
+{seq_lines or '  (no data)'}
+
+═══ ENGAGEMENT ══════════════════════════════════════════════════
+Links in body: {'YES — ' + str(link_count) + ' link(s) found' if has_links else 'NO — omit CTR from analysis entirely'}
+Clicks:        {total_clicks} ({unique_clickers} unique)
+Replies:       {total_responses} ({reply_rate}% reply rate)
+
+═══ LIST HEALTH ═════════════════════════════════════════════════
+Leads in list:        {list_total}
+Previously responded: {list_responded} ({hist_rate}% historical reply rate on this list across ALL campaigns)
+
+═══ SUBJECT FLAGS ═══════════════════════════════════════════════
+Spam-trigger words: {', '.join(subject_flags) if subject_flags else 'none detected'}
+ALL-CAPS words:     {all_caps_words}
+
+═══ ANALYSIS RULES (follow strictly) ════════════════════════════
+1. CONNECT PROBLEMS — don't list symptoms in isolation. Show how high velocity → spam folder → copy never seen → reply rate irrelevant is one chain, not three separate issues.
+2. OFFER TRUST THRESHOLD — evaluate whether the ask in the email (what you're asking the recipient to do or agree to) is calibrated correctly for a cold first touch with zero prior relationship. A high-trust ask (e.g. handing over operational control, sharing CRM access, booking a call) needs a sequence to warm up to it. A low-trust ask (e.g. "reply yes/no") can work in one touch.
+3. STRUCTURAL VERDICT — conclude whether this campaign was "winnable as configured" or "structurally unwinnable regardless of copy quality." Be direct.
+4. NO FILLER — if the copy is genuinely strong, say so plainly and move on. Don't pad with generic advice.
+5. If body has NO links, do not mention CTR or clicks anywhere.
+6. If follow-ups = 0, explain WHY that matters specifically for THIS offer — not just "follow-ups increase reply rates."
+7. Send velocity matters: anything over 2 emails/minute from a single domain is a deliverability risk. Calculate it from the send window and call it out if it's a problem.
+
+Respond in this EXACT structure (### headers, no preamble, no intro sentence):
+
+### 🔗 Root Cause Chain
+(2–4 sentences max — the single connected narrative of why this failed, cause → effect → outcome)
+
+### 🚨 Compounding Problems
+(Bullet each issue, but show how it made the others worse — reference actual numbers)
+
+### 📊 Benchmarks
+(Only metrics that exist and matter for this campaign — skip CTR if no links)
+
+### 🔧 Rebuild Plan
+(Numbered steps to fix the architecture, not just the tactics — be specific: exact days, exact sequences, exact trust-building steps if the offer needs them)
+
+### ✅ Keep
+(What's genuinely working — be honest and brief)
+"""
+
+        # ── Call Groq ────────────────────────────────────────────────────
+        groq_resp = requests.post(
+            'https://api.groq.com/openai/v1/chat/completions',
+            headers={
+                'Authorization': f'Bearer {groq_key}',
+                'Content-Type':  'application/json',
+            },
+            json={
+                'model':      'llama-3.3-70b-versatile',
+                'max_tokens': 1024,
+                'messages':   [{'role': 'user', 'content': prompt}],
+            },
+            timeout=30,
+        )
+        groq_data = groq_resp.json()
+        if 'error' in groq_data:
+            return jsonify({"error": groq_data['error'].get('message', 'Groq error')}), 502
+
+        diagnosis = groq_data['choices'][0]['message']['content']
+        return jsonify({"ok": True, "diagnosis": diagnosis}), 200
+
+    except Exception as e:
+        return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
+
+
 @app.route('/api/campaigns', methods=['POST'])
 def api_create_campaign():
     try:
         data = request.get_json(force=True)
 
-        # FIX: save send_delay_seconds and send_jitter_seconds to the campaigns row.
-        # Previously these fields were silently dropped here even if the frontend sent
-        # them, so the worker and queue functions could never read them back.
         result = supabase.table("campaigns").insert({
-            "name":                 data.get('name'),
-            "subject":              data.get('subject'),
-            "body":                 data.get('body'),
-            "list_name":            data.get('list_name'),
-            "send_immediately":     data.get('send_immediately', False),
-            "send_delay_seconds":   int(data.get('send_delay_seconds') or 0),
-            "send_jitter_seconds":  int(data.get('send_jitter_seconds') or 0),
+            "name":             data.get('name'),
+            "subject":          data.get('subject'),
+            "body":             data.get('body'),
+            "list_name":        data.get('list_name'),
+            "send_immediately": data.get('send_immediately', False),
         }).execute()
 
         if getattr(result, "error", None):
@@ -455,21 +925,8 @@ def api_create_campaign():
                 .select("*").eq("list_name", data.get('list_name')).execute()
 
             if leads.data:
-                # FIX: stagger scheduled_for per lead using delay + jitter.
-                # Previously every lead in the batch got the exact same
-                # scheduled_for = now(), so all emails fired simultaneously
-                # regardless of what delay/jitter was configured.
-                delay  = int(campaign.get('send_delay_seconds') or 0)
-                jitter = int(campaign.get('send_jitter_seconds') or 0)
-                now    = datetime.now(timezone.utc)
-
                 queue = []
-                for idx, lead in enumerate(leads.data):
-                    # Each lead gets its own unique send time:
-                    #   base offset = idx * delay (spreads them out evenly)
-                    #   + random jitter within [0, jitter] (avoids sending in lockstep)
-                    offset = (idx * delay) + (random.randint(0, jitter) if jitter > 0 else 0)
-                    scheduled = now + timedelta(seconds=offset)
+                for lead in leads.data:
                     queue.append({
                         "campaign_id":   campaign_id,
                         "lead_id":       lead['id'],
@@ -477,7 +934,7 @@ def api_create_campaign():
                         "subject":       render_email_template(data.get('subject', ''), lead),
                         "body":          render_email_template(data.get('body', ''),    lead),
                         "sequence":      0,
-                        "scheduled_for": scheduled.isoformat(),
+                        "scheduled_for": datetime.now(timezone.utc).isoformat(),
                     })
 
                 for i in range(0, len(queue), 100):
@@ -520,18 +977,11 @@ def api_queue_followup():
         if not leads.data:
             return jsonify({"ok": True, "queued": 0}), 200
 
-        # FIX: stagger scheduled_for per lead using the campaign's delay/jitter settings.
-        # Previously a single send_date was computed once and reused for every lead,
-        # so the entire follow-up batch would land in the worker at the same second.
-        delay  = int(campaign.data.get('send_delay_seconds') or 0)
-        jitter = int(campaign.data.get('send_jitter_seconds') or 0)
-        base   = datetime.now(timezone.utc) + timedelta(
+        send_date = datetime.now(timezone.utc) + timedelta(
             days=follow_up.data['days_after_previous'])
-
         queue = []
-        for idx, lead in enumerate(leads.data):
-            offset    = (idx * delay) + (random.randint(0, jitter) if jitter > 0 else 0)
-            scheduled = base + timedelta(seconds=offset)
+
+        for lead in leads.data:
             queue.append({
                 "campaign_id":   campaign_id,
                 "lead_id":       lead['id'],
@@ -539,7 +989,7 @@ def api_queue_followup():
                 "subject":       render_email_template(follow_up.data['subject'], lead),
                 "body":          render_email_template(follow_up.data['body'],    lead),
                 "sequence":      sequence,
-                "scheduled_for": scheduled.isoformat(),
+                "scheduled_for": send_date.isoformat(),
             })
 
         total = 0
@@ -933,21 +1383,19 @@ def api_record_ai_usage():
         if not lead.data:
             return jsonify({"error": "Lead not found"}), 404
 
-        email = lead.data['email']
-        existing = supabase.table("ai_demo_usage").select("id, use_count") \
-            .eq("email", email).execute()
+        email    = lead.data['email']
+        existing = supabase.table("ai_demo_usage").select("*").eq("email", email).execute()
 
         if existing.data:
             supabase.table("ai_demo_usage").update({
-                "use_count":   existing.data[0]['use_count'] + 1,
-                "last_used_at": datetime.now(timezone.utc).isoformat(),
+                "usage_count": existing.data[0]['usage_count'] + 1,
+                "last_used_at": datetime.now(timezone.utc).isoformat()
             }).eq("email", email).execute()
         else:
             supabase.table("ai_demo_usage").insert({
-                "email":       email,
-                "lead_id":     lead_id,
-                "use_count":   1,
-                "last_used_at": datetime.now(timezone.utc).isoformat(),
+                "lead_id": lead_id, "email": email, "usage_count": 1,
+                "first_used_at": datetime.now(timezone.utc).isoformat(),
+                "last_used_at":  datetime.now(timezone.utc).isoformat(),
             }).execute()
 
         return jsonify({"ok": True}), 200
