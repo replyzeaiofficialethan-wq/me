@@ -1,14 +1,20 @@
-# worker.py  –  Gmail API edition
+# worker.py  –  Gmail API + SMTP edition
 #
 # HOW SENDING WORKS:
 #   1. Pull queued emails due now (sent_at IS NULL, scheduled_for <= now)
 #   2. CLAIM them atomically with claimed_at to prevent duplicate sends
 #      across concurrent runs (external cron + GitHub schedule overlap)
-#   3. For each email look up the assigned gmail_account (sticky per lead/campaign)
-#   4. Decrypt the stored refresh_token, exchange it for a fresh access_token
-#      via Google's token endpoint – NO passwords, NO SMTP ports
-#   5. POST the RFC-2822 message to Gmail API /v1/users/me/send
-#   6. Mark sent, increment daily + hourly count, schedule next follow-up
+#   3. For each email look up the assigned account (sticky per lead/campaign).
+#      Accounts can be Gmail OAuth (gmail_accounts table) OR plain SMTP
+#      (smtp_accounts table). Both rotate together in the same pool.
+#   4. Gmail path: decrypt refresh_token → exchange for access_token → Gmail API
+#      SMTP path:  decrypt smtp_password → connect via smtplib → STARTTLS/SSL
+#   5. Mark sent, increment daily + hourly count, schedule next follow-up
+#
+# REQUIRED DB CHANGE (run once in Supabase SQL editor):
+#   ALTER TABLE lead_campaign_accounts
+#     ADD COLUMN IF NOT EXISTS smtp_account TEXT,
+#     ADD COLUMN IF NOT EXISTS sender_type  TEXT DEFAULT 'gmail';
 #
 # THROTTLING (actually works with GitHub Actions cron):
 #   - MAX_EMAILS_PER_RUN   : hard cap per worker invocation (default 50)
@@ -75,9 +81,11 @@ import os
 import base64
 import random
 import re
+import smtplib
 import requests
 import urllib.parse
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, date, timezone
 from supabase import create_client
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -193,6 +201,41 @@ def send_email_via_gmail(account: dict, to_email: str,
         return False
 
 
+def send_email_via_smtp(account: dict, to_email: str,
+                        subject: str, html_body: str) -> bool:
+    """Send one email via plain SMTP using stored credentials."""
+    try:
+        password    = aesgcm_decrypt(account["encrypted_smtp_password"])
+        sender_name = account.get("display_name") or account["email"]
+        port        = int(account.get("smtp_port") or 587)
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = f"{sender_name} <{account['email']}>"
+        msg["To"]      = to_email
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        if port == 465:
+            server = smtplib.SMTP_SSL(account["smtp_host"], port, timeout=30)
+        else:
+            server = smtplib.SMTP(account["smtp_host"], port, timeout=30)
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+
+        server.login(account["smtp_username"], password)
+        server.sendmail(account["email"], [to_email], msg.as_string())
+        server.quit()
+        return True
+
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"[SMTP AUTH ERROR] {account['email']}: {e}")
+        return False
+    except Exception as e:
+        print(f"[SMTP EXCEPTION] {account['email']} -> {to_email}: {e}")
+        return False
+
+
 # ── Hourly rate limiter ───────────────────────────────────────────────────────
 def current_hour_window() -> str:
     """Return the current UTC hour as an ISO string (e.g. '2025-01-15T14:00:00+00:00')."""
@@ -276,53 +319,112 @@ def unclaim_email(email_id):
 
 # ── Account management ────────────────────────────────────────────────────────
 def get_account_for_lead_campaign(lead_id, campaign_id):
+    """
+    Return the sticky sender account for this lead+campaign, or None.
+    Checks both Gmail (sender_type='gmail') and SMTP (sender_type='smtp').
+    Falls back to the legacy gmail_account column for older rows.
+    """
     try:
         row = supabase.table("lead_campaign_accounts") \
-            .select("gmail_account") \
+            .select("gmail_account, smtp_account, sender_type") \
             .eq("lead_id", lead_id) \
             .eq("campaign_id", campaign_id) \
             .execute()
 
-        if row.data and row.data[0].get("gmail_account"):
-            acct = supabase.table("gmail_accounts") \
+        if not row.data:
+            return None
+
+        r            = row.data[0]
+        sender_type  = r.get("sender_type") or "gmail"
+        smtp_email   = r.get("smtp_account")
+        gmail_email  = r.get("gmail_account")
+
+        if sender_type == "smtp" and smtp_email:
+            acct = supabase.table("smtp_accounts") \
                 .select("*") \
-                .eq("email", row.data[0]["gmail_account"]) \
+                .eq("email", smtp_email) \
                 .single() \
                 .execute()
-            return acct.data
+            if acct.data:
+                acct.data["_type"] = "smtp"
+                return acct.data
+
+        if gmail_email:
+            acct = supabase.table("gmail_accounts") \
+                .select("*") \
+                .eq("email", gmail_email) \
+                .single() \
+                .execute()
+            if acct.data:
+                acct.data["_type"] = "gmail"
+                return acct.data
+
     except Exception:
         pass
     return None
 
 
-def assign_account_to_lead_campaign(lead_id, campaign_id, account_email: str):
-    supabase.table("lead_campaign_accounts").upsert({
-        "lead_id":       lead_id,
-        "campaign_id":   campaign_id,
-        "gmail_account": account_email,
-    }).execute()
+def assign_account_to_lead_campaign(lead_id, campaign_id, account_email: str,
+                                     sender_type: str = "gmail"):
+    payload = {
+        "lead_id":     lead_id,
+        "campaign_id": campaign_id,
+        "sender_type": sender_type,
+    }
+    if sender_type == "smtp":
+        payload["smtp_account"]  = account_email
+    else:
+        payload["gmail_account"] = account_email
+
+    supabase.table("lead_campaign_accounts").upsert(payload).execute()
 
 
 def get_all_accounts_with_capacity() -> list:
-    today = date.today().isoformat()
+    """
+    Return all sending accounts (Gmail + SMTP) that still have daily capacity,
+    each tagged with _type='gmail' or _type='smtp'.
+    """
+    today  = date.today().isoformat()
+    result = []
 
-    accounts = supabase.table("gmail_accounts") \
+    # ── Gmail accounts ────────────────────────────────────────────────────────
+    gmail_rows = supabase.table("gmail_accounts") \
         .select("*") \
         .eq("gmail_connected", True) \
         .execute()
 
-    result = []
-    for acct in accounts.data:
+    for acct in (gmail_rows.data or []):
         cd = supabase.table("daily_email_counts") \
             .select("count") \
             .eq("email_account", acct["email"]) \
             .eq("date", today) \
             .execute()
-
         count     = cd.data[0]["count"] if cd.data else 0
         remaining = DAILY_LIMIT - count
-
         if remaining > 0:
+            acct["_type"] = "gmail"
+            result.append({
+                "account":     acct,
+                "sent_today":  count,
+                "remaining":   remaining,
+                "daily_limit": DAILY_LIMIT,
+            })
+
+    # ── SMTP accounts ─────────────────────────────────────────────────────────
+    smtp_rows = supabase.table("smtp_accounts") \
+        .select("*") \
+        .execute()
+
+    for acct in (smtp_rows.data or []):
+        cd = supabase.table("daily_email_counts") \
+            .select("count") \
+            .eq("email_account", acct["email"]) \
+            .eq("date", today) \
+            .execute()
+        count     = cd.data[0]["count"] if cd.data else 0
+        remaining = DAILY_LIMIT - count
+        if remaining > 0:
+            acct["_type"] = "smtp"
             result.append({
                 "account":     acct,
                 "sent_today":  count,
@@ -433,7 +535,7 @@ def schedule_followup(q: dict, sequence: int, account_email: str):
 # ── Main send loop ─────────────────────────────────────────────────────────────
 def send_queued():
     print("=" * 60)
-    print("WORKER START  (Gmail API mode)")
+    print("WORKER START  (Gmail API + SMTP mode)")
     now = datetime.now(timezone.utc)
     print(f"UTC: {now.isoformat()}")
 
@@ -471,15 +573,15 @@ def send_queued():
     # ── Load accounts ─────────────────────────────────────────────────────────
     available    = get_all_accounts_with_capacity()
     if not available:
-        print("All Gmail accounts have reached today's daily limit.")
+        print("All sending accounts (Gmail + SMTP) have reached today's daily limit.")
         # Unclaim everything so tomorrow's first run can pick them up
         for q in queued:
             unclaim_email(q["id"])
         return
 
-    print(f"Gmail accounts with capacity: {len(available)}")
+    print(f"Accounts with capacity: {len(available)}")
     for a in available:
-        print(f"  {a['account']['email']}  "
+        print(f"  [{a['account']['_type'].upper()}] {a['account']['email']}  "
               f"sent={a['sent_today']}  remaining={a['remaining']}")
 
     sent_count   = 0
@@ -512,7 +614,9 @@ def send_queued():
             acct_index = acct_index % total_accnts
             acct_data  = available[acct_index]
             assign_account_to_lead_campaign(
-                q["lead_id"], q["campaign_id"], acct_data["account"]["email"]
+                q["lead_id"], q["campaign_id"],
+                acct_data["account"]["email"],
+                sender_type=acct_data["account"].get("_type", "gmail"),
             )
 
         account       = acct_data["account"]
@@ -533,12 +637,22 @@ def send_queued():
                 final_body, q["lead_id"], q["campaign_id"], q["id"]
             )
 
-            ok = send_email_via_gmail(
-                account   = account,
-                to_email  = q["lead_email"],
-                subject   = final_subject,
-                html_body = tracked_body,
-            )
+            # Dispatch to the right sender based on account type
+            account_type = account.get("_type", "gmail")
+            if account_type == "smtp":
+                ok = send_email_via_smtp(
+                    account   = account,
+                    to_email  = q["lead_email"],
+                    subject   = final_subject,
+                    html_body = tracked_body,
+                )
+            else:
+                ok = send_email_via_gmail(
+                    account   = account,
+                    to_email  = q["lead_email"],
+                    subject   = final_subject,
+                    html_body = tracked_body,
+                )
 
             if ok:
                 supabase.table("email_queue").update({
@@ -567,7 +681,8 @@ def send_queued():
 
                 schedule_followup(q, q["sequence"] + 1, account["email"])
                 sent_count += 1
-                print(f"[SENT] {q['lead_email']} via {account['email']}  "
+                print(f"[SENT] {q['lead_email']} via {account['email']} "
+                      f"[{account.get('_type','gmail').upper()}]  "
                       f"seq={q['sequence']}")
 
                 # NOTE: No time.sleep() here.
