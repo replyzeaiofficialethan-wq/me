@@ -1643,59 +1643,81 @@ def api_manual_reply():
         if not to_email or not body:
             return jsonify({"error": "to_email and body required"}), 400
 
+        account = None
+        is_smtp = False
+
         if pref_account:
+            # Check Gmail accounts first
             acct_r = supabase.table("gmail_accounts").select("*") \
-                         .eq("email", pref_account).single().execute()
-            account = acct_r.data
+                         .eq("email", pref_account).execute()
+            if acct_r.data:
+                account = acct_r.data[0]
+            else:
+                # Then check SMTP accounts
+                acct_r = supabase.table("smtp_accounts").select("*") \
+                             .eq("email", pref_account).execute()
+                if acct_r.data:
+                    account = acct_r.data[0]
+                    is_smtp = True
         else:
+            # Fallback to first available Gmail account
             accts = supabase.table("gmail_accounts") \
                         .select("*").eq("gmail_connected", True).execute()
             account = accts.data[0] if accts.data else None
 
         if not account:
-            return jsonify({"error": "no_gmail_account_available"}), 400
+            return jsonify({"error": "account_not_found_or_not_available"}), 400
 
-        token_resp = requests.post(GOOGLE_TOKEN_URL, data={
-            "client_id":     GOOGLE_CLIENT_ID,
-            "client_secret": GOOGLE_CLIENT_SECRET,
-            "refresh_token": aesgcm_decrypt(account["encrypted_refresh_token"]),
-            "grant_type":    "refresh_token",
-        }, timeout=15)
+        if is_smtp:
+            try:
+                send_via_smtp(account, to_email, subject, body.replace('\n', '<br>'))
+            except Exception as smtp_err:
+                return jsonify({"error": "smtp_send_failed", "detail": str(smtp_err)}), 400
+        else:
+            # Gmail OAuth path
+            token_resp = requests.post(GOOGLE_TOKEN_URL, data={
+                "client_id":     GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "refresh_token": aesgcm_decrypt(account["encrypted_refresh_token"]),
+                "grant_type":    "refresh_token",
+            }, timeout=15)
 
-        if token_resp.status_code != 200:
-            return jsonify({"error": "token_refresh_failed"}), 400
+            if token_resp.status_code != 200:
+                return jsonify({"error": "token_refresh_failed"}), 400
 
-        access_token = token_resp.json().get("access_token")
+            access_token = token_resp.json().get("access_token")
 
-        from email.mime.text import MIMEText as _MIME
-        msg            = _MIME(body.replace('\n', '<br>'), "html", "utf-8")
-        msg["To"]      = to_email
-        msg["From"]    = f"{account['display_name']} <{account['email']}>"
-        msg["Subject"] = subject
+            from email.mime.text import MIMEText as _MIME
+            msg            = _MIME(body.replace('\n', '<br>'), "html", "utf-8")
+            msg["To"]      = to_email
+            msg["From"]    = f"{account['display_name']} <{account['email']}>"
+            msg["Subject"] = subject
 
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8").rstrip("=")
-        send_resp = requests.post(
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-            headers={"Authorization": f"Bearer {access_token}",
-                     "Content-Type": "application/json"},
-            json={"raw": raw},
-            timeout=30,
-        )
-
-        if send_resp.status_code in (200, 201):
-            supabase.table("reply_audit_log").insert({
-                "event_type": "MANUAL_REPLY_SENT",
-                "data": {"to": to_email, "subject": subject, "account": account['email']},
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }).execute()
-            notify(
-                '📤 Manual Reply Sent',
-                f'To: {to_email}\nSubject: {subject or "(no subject)"}\nFrom: {account["email"]}',
-                priority='low', tags='outbox_tray',
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8").rstrip("=")
+            send_resp = requests.post(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+                headers={"Authorization": f"Bearer {access_token}",
+                         "Content-Type": "application/json"},
+                json={"raw": raw},
+                timeout=30,
             )
-            return jsonify({"ok": True}), 200
 
-        return jsonify({"error": "send_failed", "detail": send_resp.text}), 400
+            if send_resp.status_code not in (200, 201):
+                return jsonify({"error": "gmail_send_failed", "detail": send_resp.text}), 400
+
+        # Success - log and notify
+        supabase.table("reply_audit_log").insert({
+            "event_type": "MANUAL_REPLY_SENT",
+            "data": {"to": to_email, "subject": subject, "account": account['email'], "type": "smtp" if is_smtp else "gmail"},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+
+        notify(
+            '📤 Manual Reply Sent',
+            f'To: {to_email}\nSubject: {subject or "(no subject)"}\nFrom: {account["email"]}',
+            priority='low', tags='outbox_tray',
+        )
+        return jsonify({"ok": True}), 200
 
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
