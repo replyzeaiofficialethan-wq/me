@@ -820,32 +820,25 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         _create_human_review_ticket(from_email, subject, body_text, intent, reasoning)
         _log_audit('OPS_TICKET_CREATED', {'from': from_email, 'intent': intent})
 
-    # ── Step 4: Send reply via SMTP ───────────────────────────────────────────
+    # ── Step 4: [DISABLED] Send reply via SMTP ────────────────────────────────
+    # SMTP accounts are now restricted to manual replies only.
     auto_reply_sent = False
-    if reply_html:
-        ok = _send_smtp_reply(account, from_email, subject,
-                              reply_html, orig_msg_id, references)
-        auto_reply_sent = ok
-
-        if ok:
-            print(f"  [SENT] SMTP auto-reply → {from_email} ({intent})")
-            _log_audit('AUTO_REPLY_SENT', {
-                'to': from_email, 'intent': intent, 'reasoning': reasoning,
-                'auto_reply': reply_html[:300], 'account': account['email'],
-                'channel': 'smtp',
-            })
-            _store_responded_lead(lead['id'], from_email, intent, body_text)
-        else:
-            print(f"  [FAILED] SMTP auto-reply → {from_email}")
-            _log_audit('AUTO_REPLY_FAILED', {
-                'to': from_email, 'intent': intent, 'account': account['email'],
-            })
+    print(f"  [SKIPPED] SMTP auto-reply → {from_email} (SMTP auto-replies disabled)")
+    
+    _log_audit('AUTO_REPLY_SKIPPED', {
+        'to': from_email, 'intent': intent, 'reasoning': reasoning,
+        'account': account['email'], 'channel': 'smtp',
+        'reason': 'SMTP auto-replies disabled by policy'
+    })
+    
+    # Still store as responded lead so it shows up in the admin panel
+    _store_responded_lead(lead['id'], from_email, intent, body_text)
 
     _mark_processed(
         orig_msg_id, account['email'], from_email,
         intent, auto_reply_sent,
         raw_reply=body_text,
-        auto_reply_body=reply_html or '',
+        auto_reply_body='', # No auto-reply generated for SMTP
         reasoning=reasoning,
     )
 

@@ -321,12 +321,12 @@ def unclaim_email(email_id):
 def get_account_for_lead_campaign(lead_id, campaign_id):
     """
     Return the sticky sender account for this lead+campaign, or None.
-    Checks both Gmail (sender_type='gmail') and SMTP (sender_type='smtp').
-    Falls back to the legacy gmail_account column for older rows.
+    ONLY returns Gmail accounts. If previously assigned to SMTP, returns None
+    to force reassignment to a Gmail account.
     """
     try:
         row = supabase.table("lead_campaign_accounts") \
-            .select("gmail_account, smtp_account, sender_type") \
+            .select("gmail_account, sender_type") \
             .eq("lead_id", lead_id) \
             .eq("campaign_id", campaign_id) \
             .execute()
@@ -336,18 +336,10 @@ def get_account_for_lead_campaign(lead_id, campaign_id):
 
         r            = row.data[0]
         sender_type  = r.get("sender_type") or "gmail"
-        smtp_email   = r.get("smtp_account")
         gmail_email  = r.get("gmail_account")
 
-        if sender_type == "smtp" and smtp_email:
-            acct = supabase.table("smtp_accounts") \
-                .select("*") \
-                .eq("email", smtp_email) \
-                .single() \
-                .execute()
-            if acct.data:
-                acct.data["_type"] = "smtp"
-                return acct.data
+        if sender_type == "smtp":
+            return None # Force reassignment to Gmail
 
         if gmail_email:
             acct = supabase.table("gmail_accounts") \
@@ -381,8 +373,8 @@ def assign_account_to_lead_campaign(lead_id, campaign_id, account_email: str,
 
 def get_all_accounts_with_capacity() -> list:
     """
-    Return all sending accounts (Gmail + SMTP) that still have daily capacity,
-    each tagged with _type='gmail' or _type='smtp'.
+    Return all sending Gmail accounts that still have daily capacity.
+    SMTP accounts are excluded from automated sending.
     """
     today  = date.today().isoformat()
     result = []
@@ -410,28 +402,9 @@ def get_all_accounts_with_capacity() -> list:
                 "daily_limit": DAILY_LIMIT,
             })
 
-    # ── SMTP accounts ─────────────────────────────────────────────────────────
-    smtp_rows = supabase.table("smtp_accounts") \
-        .select("*") \
-        .execute()
-
-    for acct in (smtp_rows.data or []):
-        cd = supabase.table("daily_email_counts") \
-            .select("count") \
-            .eq("email_account", acct["email"]) \
-            .eq("date", today) \
-            .execute()
-        count     = cd.data[0]["count"] if cd.data else 0
-        remaining = DAILY_LIMIT - count
-        if remaining > 0:
-            acct["_type"] = "smtp"
-            result.append({
-                "account":     acct,
-                "sent_today":  count,
-                "remaining":   remaining,
-                "daily_limit": DAILY_LIMIT,
-            })
-
+    # Sort by remaining capacity to help balance load, but also randomize 
+    # to avoid always hitting the same account first across different runs.
+    random.shuffle(result)
     result.sort(key=lambda x: x["remaining"], reverse=True)
     return result
 
@@ -586,8 +559,9 @@ def send_queued():
 
     sent_count   = 0
     failed_count = 0
-    acct_index   = 0
     total_accnts = len(available)
+    # Start at a random index to ensure equal distribution over time
+    acct_index   = random.randrange(total_accnts) if total_accnts > 0 else 0
 
     for q in queued:
 
