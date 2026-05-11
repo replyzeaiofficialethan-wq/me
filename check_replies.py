@@ -558,32 +558,32 @@ def _extract_plain_text(payload: dict) -> str:
             return result
     return ''
 
-def _send_gmail_reply(account: dict, access_token: str,
-                      to_email: str, subject: str, html_body: str,
-                      thread_id: str | None, orig_message_id: str | None) -> bool:
-    try:
-        reply_subject = subject if subject.lower().startswith('re:') else f"Re: {subject}"
-        msg            = MIMEText(html_body, "html", "utf-8")
-        msg["To"]      = to_email
-        msg["From"]    = f"{account['display_name']} <{account['email']}>"
-        msg["Subject"] = reply_subject
-        if orig_message_id:
-            msg["In-Reply-To"] = orig_message_id
-            msg["References"]  = orig_message_id
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8").rstrip("=")
-        payload: dict = {"raw": raw}
-        if thread_id:
-            payload["threadId"] = thread_id
-        resp = requests.post(
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-            headers={"Authorization": f"Bearer {access_token}",
-                     "Content-Type":  "application/json"},
-            json=payload, timeout=30,
-        )
-        return resp.status_code in (200, 201)
-    except Exception as exc:
-        print(f"[REPLY SEND ERROR] {exc}")
-        return False
+#def _send_gmail_reply(account: dict, access_token: str,
+#                      to_email: str, subject: str, html_body: str,
+#                      thread_id: str | None, orig_message_id: str | None) -> bool:
+#    try:
+#        reply_subject = subject if subject.lower().startswith('re:') else f"Re: {subject}"
+#        msg            = MIMEText(html_body, "html", "utf-8")
+#        msg["To"]      = to_email
+#        msg["From"]    = f"{account['display_name']} <{account['email']}>"
+#        msg["Subject"] = reply_subject
+#        if orig_message_id:
+#            msg["In-Reply-To"] = orig_message_id
+#            msg["References"]  = orig_message_id
+#        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8").rstrip("=")
+#        payload: dict = {"raw": raw}
+#        if thread_id:
+#            payload["threadId"] = thread_id
+#        resp = requests.post(
+#            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+#            headers={"Authorization": f"Bearer {access_token}",
+#                     "Content-Type":  "application/json"},
+#            json=payload, timeout=30,
+#        )
+#        return resp.status_code in (200, 201)
+#    except Exception as exc:
+#        print(f"[REPLY SEND ERROR] {exc}")
+#        return False
 
 #── SMTP reply sender ─────────────────────────────────────────────────────────
 def _send_smtp_reply(account: dict, to_email: str, subject: str,
