@@ -74,8 +74,8 @@ _groq_cursor: int       = 0
 #── UPDATED: Property-focused intents ─────────────────────────────────────────
 _GROQ_VALID_INTENTS = {
     'AGENT_HANDLES', 'NOBODY_HANDLES', 'ASSISTANT_HANDLES', 'INTERESTED',
-    'ASKS_PRICE', 'ASKS_DETAILS', 'ASKS_IDENTITY', 'ACKNOWLEDGMENT_ONLY',
-    'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'UNKNOWN'
+    'CLARIFICATION_REQ', 'ASKS_PRICE', 'ASKS_DETAILS', 'ASKS_IDENTITY',
+    'ACKNOWLEDGMENT_ONLY', 'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'UNKNOWN'
 }
 
 #── UPDATED: system prompt rewritten for Instant Auto-Reply service ────────────
@@ -99,7 +99,8 @@ INTENT LABELS:
 AGENT_HANDLES      : They say they handle replies themselves (e.g., "Me", "I do", "I handle it").
 NOBODY_HANDLES     : They say nobody handles it, they miss leads, or it's a problem (e.g., "Nobody", "I usually miss them", "Good question").
 ASSISTANT_HANDLES  : They have an assistant, team, or another service handling it.
-INTERESTED         : They are interested or want to know more, without specifying who currently handles it.
+INTERESTED         : They are interested or want to know more.
+CLARIFICATION_REQ  : They are confused by our initial question or asking "Why are you asking?" / "What do you mean?".
 ASKS_PRICE         : They are asking about pricing / cost. (The trial is free).
 ASKS_DETAILS       : They want to know how the auto-reply system works.
 ASKS_IDENTITY      : They are asking who you are or what company this is.
@@ -109,12 +110,13 @@ NEGATIVE_OBJECTION : Upset, frustrated, or angrily correcting us.
 UNKNOWN            : Cannot determine intent.
 
 REPLY TONE AND OFFER LOGIC:
-- If AGENT_HANDLES: Acknowledge it's a lot of work to stay on top of, especially during showings. Mention our service handles the busy work by instantly giving leads the beds/baths/HOA info they want. Suggest a free trial for one property to save them time.
-- If NOBODY_HANDLES: Highlight that missed leads are missed commissions. Our service ensures every lead gets an instant reply with property details even if they are busy. Suggest a free trial for one property to capture those leads.
-- If ASSISTANT_HANDLES: Suggest our service can supplement their assistant by providing instant, detailed property context 24/7 so nothing slips through.
-- If INTERESTED: Briefly explain the benefit of instant property context and suggest the free trial for one property.
-- If ASKS_PRICE: Mention the small batch/one property pilot is completely free to see the results first.
-- If ASKS_DETAILS: Explain we provide instant auto-replies with property-specific details (beds, baths, HOA, etc.) so leads get info immediately without them lifting a finger.
+- If AGENT_HANDLES: Acknowledge it's a lot of work to stay on top of, especially during showings. The benefit of our service is that it handles the busy work by instantly giving leads the beds/baths/HOA info they want, so no lead slips through while you're with clients. If you're open to it, I can set up a free trial for one of your properties to show you how it works.
+- If NOBODY_HANDLES: Highlight that missed leads are missed commissions. Our service ensures every lead gets an instant reply with property details even if you are busy, keeping you professional 24/7. Would you be open to a free trial for one property to capture those leads?
+- If ASSISTANT_HANDLES: Acknowledge their team. Mention our system can supplement their assistant by providing instant, detailed property context (beds/baths/HOA) 24/7 so nothing ever slips through when the team is tied up. If that sounds useful, I can set up a free trial for one property.
+- If INTERESTED: The core benefit is instant property context — it keeps leads engaged with beds/baths/HOA data the second they text, even if you're busy. I'm happy to set up a free trial for one of your properties so you can see the results first.
+- If CLARIFICATION_REQ: Briefly and warmly explain: "I ask because many agents miss leads while they are in showings. We provide a system that sends instant replies with property context (beds/baths/HOA) so you stay professional even when you're busy. Would you be open to seeing how it works on one of your properties for free?"
+- If ASKS_PRICE: The pilot for one property is completely free so you can see the results first. We only talk pricing once you've seen how many more leads stay engaged. Want me to set it up for one of your listings this week?
+- If ASKS_DETAILS: Explain we provide a system for instant auto-replies with property-specific details (beds, baths, HOA, etc.) so leads get info immediately without you lifting a finger. This ensures you never miss an inquiry while at a showing. Would you like to try it for one property?
 
 Respond ONLY with valid JSON:
 {{
@@ -270,6 +272,7 @@ _RE_ACKNOWLEDGMENT = re.compile(
 _RE_AGENT_HANDLES = re.compile(r"\b(i do|me|myself|i handle|i reply)\b", re.I)
 _RE_NOBODY_HANDLES = re.compile(r"\b(nobody|no one|don't have|none|miss)\b", re.I)
 _RE_ASSISTANT_HANDLES = re.compile(r"\b(assistant|team|secretary|va|office)\b", re.I)
+_RE_CLARIFICATION = re.compile(r"\b(why (do you|are you) ask|what do you mean|what is this about|who are you|meaning)\b", re.I)
 
 #── Intent classifier ─────────────────────────────────────────────────────────
 def classify_intent(text: str, groq_result: dict | None = None) -> str:
@@ -299,6 +302,9 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
 
     if _RE_ASSISTANT_HANDLES.search(t):
         return 'ASSISTANT_HANDLES'
+
+    if _RE_CLARIFICATION.search(t):
+        return 'CLARIFICATION_REQ'
 
     if _RE_PRICE.search(t):
         return 'ASKS_PRICE'
@@ -345,6 +351,13 @@ def _tmpl_assistant_handles(my_name: str) -> str:
         f"Makes sense. Our service can actually supplement your team by providing "
         f"instant, detailed property context (beds/baths/HOA) 24/7 so nothing ever slips through the cracks. "
         f"Want to run a free trial for one of your properties to see the difference?\n\n— {my_name}"
+    )
+
+def _tmpl_clarification_req(my_name: str) -> str:
+    return (
+        f"Great question. I ask because many agents find they miss leads while they're in showings. "
+        f"We provide a system that sends instant replies with property context (beds/baths/HOA) so you stay professional 24/7. "
+        f"Would you be open to seeing how it works on one of your properties for free?\n\n— {my_name}"
     )
 
 def _tmpl_interested(my_name: str) -> str:
@@ -614,6 +627,12 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
             'from': from_email, 'account': account['email'],
         })
         _update_lead_status(from_email, 'interested')
+
+    elif intent == 'CLARIFICATION_REQ':
+        reply_html = groq_reply or _tmpl_clarification_req(my_name)
+        _log_audit('CLARIFICATION_REQ', {
+            'from': from_email, 'account': account['email'],
+        })
 
     elif intent == 'ASKS_IDENTITY':
         reply_html = groq_reply or _tmpl_asks_identity(my_name)
@@ -952,6 +971,13 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
             "account": account["email"],
         })
         _update_lead_status(from_email, 'interested')
+
+    elif intent == 'CLARIFICATION_REQ':
+        reply_html = groq_reply or _tmpl_clarification_req(my_name)
+        _log_audit('CLARIFICATION_REQ', {
+            "from":    from_email,
+            "account": account["email"],
+        })
 
     elif intent == 'ASKS_IDENTITY':
         # They want to know who sent this — confirm identity confidently, no apology

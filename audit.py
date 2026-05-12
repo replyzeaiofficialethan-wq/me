@@ -10,17 +10,20 @@ SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
 supabase     = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ── Groq Setup ──────────────────────────────────────────────────────────────
-def get_groq_completion(prompt, system_prompt):
+def get_groq_completion(prompt, system_prompt, model="llama-3.3-70b-versatile", retry_count=0):
     key = os.environ.get('GROQ_API_KEY')
     if not key:
         return "GROQ_API_KEY not configured."
+
+    # Rate limit buffer for free tier
+    time.sleep(2)
 
     try:
         resp = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             json={
-                "model": "llama-3.3-70b-versatile",
+                "model": model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
@@ -31,6 +34,14 @@ def get_groq_completion(prompt, system_prompt):
         )
         if resp.status_code == 200:
             return resp.json()["choices"][0]["message"]["content"]
+
+        if resp.status_code == 429 and retry_count < 3:
+            # Exponential backoff
+            wait_time = (2 ** retry_count) * 15
+            print(f"Rate limited. Waiting {wait_time}s before retry {retry_count + 1}...")
+            time.sleep(wait_time)
+            return get_groq_completion(prompt, system_prompt, model, retry_count + 1)
+
         return f"Error: {resp.status_code} - {resp.text}"
     except Exception as e:
         return f"Exception: {str(e)}"
@@ -39,16 +50,17 @@ def get_groq_completion(prompt, system_prompt):
 def fetch_audit_data():
     data = {}
 
-    # Recent leads
-    leads_res = supabase.table("leads").select("city,brokerage,responded,outreach_status").limit(1000).execute()
+    # Selectively sample leads to find low-conversion patterns without hitting token limits
+    # Focus on diversity of brokerage and city
+    leads_res = supabase.table("leads").select("city,brokerage,responded,outreach_status").limit(300).execute()
     data['leads_summary'] = leads_res.data
 
-    # Recent responses
-    responses_res = supabase.table("responded_leads").select("*").order("responded_at", desc=True).limit(50).execute()
+    # Recent responses - focus on the content
+    responses_res = supabase.table("responded_leads").select("intent,raw_reply").order("responded_at", desc=True).limit(20).execute()
     data['recent_responses'] = responses_res.data
 
     # Recent decisions
-    decisions_res = supabase.table("processed_replies").select("intent,reasoning,raw_reply").order("processed_at", desc=True).limit(50).execute()
+    decisions_res = supabase.table("processed_replies").select("intent,reasoning,raw_reply").order("processed_at", desc=True).limit(20).execute()
     data['recent_decisions'] = decisions_res.data
 
     # Code snippets
@@ -74,7 +86,7 @@ def run_data_analyst(audit_data):
     leads_json = json.dumps(audit_data['leads_summary'])
     prompt = f"Analyze these lead segments and outreach statuses for patterns of success or failure:\n\n{leads_json}"
 
-    return get_groq_completion(prompt, system_prompt)
+    return get_groq_completion(prompt, system_prompt, model="llama-3.1-8b-instant")
 
 # ── Agent 2: Sentiment Specialist ───────────────────────────────────────────
 def run_sentiment_specialist(audit_data):
@@ -91,7 +103,7 @@ def run_sentiment_specialist(audit_data):
     decisions_json = json.dumps(audit_data['recent_decisions'])
     prompt = f"Read these actual replies and our AI's reasoning. Identify common objections and friction points:\n\nResponses:\n{responses_json}\n\nDecisions/Reasoning:\n{decisions_json}"
 
-    return get_groq_completion(prompt, system_prompt)
+    return get_groq_completion(prompt, system_prompt, model="llama-3.1-8b-instant")
 
 # ── Agent 3: System Architect ───────────────────────────────────────────────
 def run_system_architect(audit_data):
@@ -137,9 +149,11 @@ def generate_audit_report(save_to_file=True):
     audit_data = fetch_audit_data()
 
     analyst_output = run_data_analyst(audit_data)
+    time.sleep(5) # Rate limit gap
     sentiment_output = run_sentiment_specialist(audit_data)
+    time.sleep(5)
     architect_output = run_system_architect(audit_data)
-
+    time.sleep(5)
     summary_output = run_lead_auditor(analyst_output, sentiment_output, architect_output)
 
     # Aggregate Report
