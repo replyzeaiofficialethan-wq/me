@@ -678,215 +678,36 @@ def api_campaign_stats(campaign_id):
 @app.route('/api/campaigns/<int:campaign_id>/diagnose', methods=['POST'])
 def api_campaign_diagnose(campaign_id):
     """
-    Pulls all campaign context from Supabase, then calls Groq to produce
-    an AI diagnosis. GROQ_API_KEY is read from the environment — never
-    exposed to the frontend.
+    Triggers the multi-agent audit logic to provide a granular diagnosis.
     """
-    groq_key = os.environ.get('GROQ_API_KEY', '')
-    if not groq_key:
-        return jsonify({"error": "GROQ_API_KEY not configured on server"}), 500
-
     try:
-        # ── Campaign + follow-ups ────────────────────────────────────────
-        campaign_res = supabase.table("campaigns") \
-            .select("*").eq("id", campaign_id).single().execute()
-        if not campaign_res.data:
-            return jsonify({"error": "not_found"}), 404
-        campaign = campaign_res.data
+        from audit import fetch_audit_data, run_data_analyst, run_sentiment_specialist, run_system_architect, run_lead_auditor
 
-        followups_res = supabase.table("campaign_followups") \
-            .select("*").eq("campaign_id", campaign_id) \
-            .order("sequence").execute()
-        follow_ups = followups_res.data or []
+        # 1. Fetch baseline data
+        audit_data = fetch_audit_data()
 
-        # ── Queue stats ──────────────────────────────────────────────────
-        queue_res = supabase.table("email_queue") \
-            .select("id,sequence,sent_at,scheduled_for,lead_email,sent_from") \
-            .eq("campaign_id", campaign_id).execute()
-        queue = queue_res.data or []
+        # 2. Filter for specific campaign if possible (or just run global audit)
+        # For simplicity and power, we run the global audit agents as they see the full funnel.
 
-        total_queued   = len(queue)
-        total_sent     = sum(1 for e in queue if e.get('sent_at'))
-        total_pending  = sum(1 for e in queue if not e.get('sent_at'))
-        unique_leads   = len(set(e['lead_email'] for e in queue if e.get('lead_email')))
-        sending_accounts = list(set(e['sent_from'] for e in queue if e.get('sent_from')))
-        sent_times     = [e['sent_at'] for e in queue if e.get('sent_at')]
-        first_sent     = min(sent_times) if sent_times else None
-        last_sent      = max(sent_times) if sent_times else None
+        analyst = run_data_analyst(audit_data)
+        sentiment = run_sentiment_specialist(audit_data)
+        architect = run_system_architect(audit_data)
+        summary = run_lead_auditor(analyst, sentiment, architect)
 
-        by_seq = {}
-        for e in queue:
-            seq = e.get('sequence', 0)
-            if seq not in by_seq:
-                by_seq[seq] = {'queued': 0, 'sent': 0}
-            by_seq[seq]['queued'] += 1
-            if e.get('sent_at'):
-                by_seq[seq]['sent'] += 1
+        report = f"""
+### 📊 Data Analysis Finding
+{analyst}
 
-        # ── Clicks ───────────────────────────────────────────────────────
-        clicks_res = supabase.table("link_clicks") \
-            .select("id,lead_id,clicked_at") \
-            .eq("campaign_id", campaign_id).execute()
-        clicks          = clicks_res.data or []
-        total_clicks    = len(clicks)
-        unique_clickers = len(set(c['lead_id'] for c in clicks if c.get('lead_id')))
+### 🧠 Sentiment & Objections
+{sentiment}
 
-        # ── Replies from lead_activity ───────────────────────────────────
-        activity_res = supabase.table("lead_activity") \
-            .select("id,action_type") \
-            .eq("campaign_id", campaign_id).execute()
-        activity        = activity_res.data or []
-        total_responses = sum(1 for a in activity if a.get('action_type') == 'responded')
+### 🏗️ Funnel Architecture
+{architect}
 
-        # ── Historical reply rate for this list ──────────────────────────
-        list_leads_res = supabase.table("leads") \
-            .select("id,responded") \
-            .eq("list_name", campaign['list_name']).execute()
-        list_leads     = list_leads_res.data or []
-        list_total     = len(list_leads)
-        list_responded = sum(1 for l in list_leads if l.get('responded'))
-
-        # ── Sending account daily usage ──────────────────────────────────
-        account_usage = []
-        for acct in sending_accounts[:5]:  # cap to avoid too many queries
-            today = datetime.now(timezone.utc).date().isoformat()
-            usage_res = supabase.table("daily_email_counts") \
-                .select("count,date") \
-                .eq("email_account", acct) \
-                .order("date", desc=True).limit(7).execute()
-            account_usage.append({
-                "account": acct,
-                "recent_days": usage_res.data or []
-            })
-
-        # ── Does the body contain any links? ────────────────────────────
-        body_text      = campaign.get('body', '')
-        has_links      = bool(re.search(r'https?://', body_text))
-        link_count     = len(re.findall(r'https?://\S+', body_text))
-
-        # ── Does subject look spammy? (basic heuristics) ────────────────
-        subject        = campaign.get('subject', '')
-        spam_words     = ['free','guarantee','no risk','limited time','act now',
-                          'click here','winner','congratulations','urgent']
-        subject_flags  = [w for w in spam_words if w.lower() in subject.lower()]
-        all_caps_words = len(re.findall(r'\b[A-Z]{3,}\b', subject))
-
-        # ── Build prompt ─────────────────────────────────────────────────
-        send_rate  = round(total_sent / total_queued * 100, 1) if total_queued else 0
-        click_rate = round(unique_clickers / total_sent * 100, 2) if total_sent else 0
-        reply_rate = round(total_responses / total_sent * 100, 2) if total_sent else 0
-        hist_rate  = round(list_responded / list_total * 100, 2) if list_total else 0
-
-        seq_lines = '\n'.join(
-            f"  Seq {'Initial' if k == 0 else '#'+str(k)}: "
-            f"{v['sent']}/{v['queued']} sent "
-            f"({round(v['sent']/v['queued']*100,1) if v['queued'] else 0}%)"
-            for k, v in sorted(by_seq.items())
-        )
-
-        account_lines = ''
-        for au in account_usage:
-            days = ', '.join(f"{d['date']}:{d['count']}" for d in au['recent_days'][:3])
-            account_lines += f"  {au['account']}: {days or 'no data'}\n"
-
-        # ── Compute send window duration ─────────────────────────────────
-        send_window_minutes = None
-        if first_sent and last_sent:
-            try:
-                fmt = '%Y-%m-%dT%H:%M:%S'
-                t1 = datetime.fromisoformat(first_sent.replace('Z', '+00:00'))
-                t2 = datetime.fromisoformat(last_sent.replace('Z', '+00:00'))
-                send_window_minutes = round((t2 - t1).total_seconds() / 60, 1)
-            except Exception:
-                pass
-
-        prompt = f"""You are a senior cold email strategist who diagnoses campaign failures at the architectural level — not just the symptom level.
-
-Your job is to identify the ROOT CAUSE chain: why did this campaign structurally fail, and how do the individual problems compound each other? Do not produce a checklist of isolated issues. Connect the dots.
-
-═══ CAMPAIGN DATA ═══════════════════════════════════════════════
-Name:         {campaign['name']}
-Lead list:    {campaign['list_name']}
-Subject line: {subject}
-Body:
-{body_text[:800]}{'...[truncated]' if len(body_text) > 800 else ''}
-
-Follow-ups configured: {len(follow_ups)}
-{chr(10).join(f"  Follow-up #{f['sequence']}: +{f['days_after_previous']}d — subject: {f['subject']}" for f in follow_ups) if follow_ups else '  (none — single-shot campaign)'}
-Send delay: {campaign.get('send_delay_seconds', 0)}s ± {campaign.get('send_jitter_seconds', 0)}s jitter
-
-═══ DELIVERY ════════════════════════════════════════════════════
-Total sent:    {total_sent} of {total_queued} queued ({send_rate}% server-acceptance rate)
-Send window:   {f'{send_window_minutes} minutes total ({round(total_sent/send_window_minutes,1) if send_window_minutes and send_window_minutes > 0 else "?"} emails/min)' if send_window_minutes is not None else 'unknown'}
-First sent:    {first_sent or 'N/A'}
-Last sent:     {last_sent or 'N/A'}
-Sending accounts: {', '.join(sending_accounts) or 'unknown'}
-Daily usage (last 3 days per account):
-{account_lines.strip() or '  (no data)'}
-
-Sequence breakdown:
-{seq_lines or '  (no data)'}
-
-═══ ENGAGEMENT ══════════════════════════════════════════════════
-Links in body: {'YES — ' + str(link_count) + ' link(s) found' if has_links else 'NO — omit CTR from analysis entirely'}
-Clicks:        {total_clicks} ({unique_clickers} unique)
-Replies:       {total_responses} ({reply_rate}% reply rate)
-
-═══ LIST HEALTH ═════════════════════════════════════════════════
-Leads in list:        {list_total}
-Previously responded: {list_responded} ({hist_rate}% historical reply rate on this list across ALL campaigns)
-
-═══ SUBJECT FLAGS ═══════════════════════════════════════════════
-Spam-trigger words: {', '.join(subject_flags) if subject_flags else 'none detected'}
-ALL-CAPS words:     {all_caps_words}
-
-═══ ANALYSIS RULES (follow strictly) ════════════════════════════
-1. CONNECT PROBLEMS — don't list symptoms in isolation. Show how high velocity → spam folder → copy never seen → reply rate irrelevant is one chain, not three separate issues.
-2. OFFER TRUST THRESHOLD — evaluate whether the ask in the email (what you're asking the recipient to do or agree to) is calibrated correctly for a cold first touch with zero prior relationship. A high-trust ask (e.g. handing over operational control, sharing CRM access, booking a call) needs a sequence to warm up to it. A low-trust ask (e.g. "reply yes/no") can work in one touch.
-3. STRUCTURAL VERDICT — conclude whether this campaign was "winnable as configured" or "structurally unwinnable regardless of copy quality." Be direct.
-4. NO FILLER — if the copy is genuinely strong, say so plainly and move on. Don't pad with generic advice.
-5. If body has NO links, do not mention CTR or clicks anywhere.
-6. If follow-ups = 0, explain WHY that matters specifically for THIS offer — not just "follow-ups increase reply rates."
-7. Send velocity matters: anything over 2 emails/minute from a single domain is a deliverability risk. Calculate it from the send window and call it out if it's a problem.
-
-Respond in this EXACT structure (### headers, no preamble, no intro sentence):
-
-### 🔗 Root Cause Chain
-(2–4 sentences max — the single connected narrative of why this failed, cause → effect → outcome)
-
-### 🚨 Compounding Problems
-(Bullet each issue, but show how it made the others worse — reference actual numbers)
-
-### 📊 Benchmarks
-(Only metrics that exist and matter for this campaign — skip CTR if no links)
-
-### 🔧 Rebuild Plan
-(Numbered steps to fix the architecture, not just the tactics — be specific: exact days, exact sequences, exact trust-building steps if the offer needs them)
-
-### ✅ Keep
-(What's genuinely working — be honest and brief)
+### 🏆 Executive Verdict
+{summary}
 """
-
-        # ── Call Groq ────────────────────────────────────────────────────
-        groq_resp = requests.post(
-            'https://api.groq.com/openai/v1/chat/completions',
-            headers={
-                'Authorization': f'Bearer {groq_key}',
-                'Content-Type':  'application/json',
-            },
-            json={
-                'model':      'llama-3.3-70b-versatile',
-                'max_tokens': 1024,
-                'messages':   [{'role': 'user', 'content': prompt}],
-            },
-            timeout=30,
-        )
-        groq_data = groq_resp.json()
-        if 'error' in groq_data:
-            return jsonify({"error": groq_data['error'].get('message', 'Groq error')}), 502
-
-        diagnosis = groq_data['choices'][0]['message']['content']
-        return jsonify({"ok": True, "diagnosis": diagnosis}), 200
+        return jsonify({"ok": True, "diagnosis": report}), 200
 
     except Exception as e:
         return jsonify({"error": "internal_server_error", "detail": str(e)}), 500
@@ -1630,6 +1451,18 @@ def api_get_processed_replies():
 # ═══════════════════════════════════════════════════════════════════════════════
 #  MANUAL OVERRIDE
 # ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/admin/audit')
+def admin_audit_report():
+    """Generates and serves the latest conversion audit report on demand."""
+    try:
+        from audit import generate_audit_report
+        # Generate in-memory to avoid filesystem issues on ephemeral hosts like Vercel
+        html_content = generate_audit_report(save_to_file=False)
+        return html_content
+    except Exception as e:
+        return f"Error generating audit report: {str(e)}", 500
+
 
 @app.route('/api/manual-reply', methods=['POST'])
 def api_manual_reply():

@@ -652,6 +652,8 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         _log_audit('OPS_TICKET_CREATED', {'from': from_email, 'intent': intent})
 
     # ── Step 4: Send reply via SMTP ────────────────────────────────
+    _store_responded_lead(lead['id'], from_email, intent, body_text)
+
     auto_reply_sent = False
     if reply_html:
         ok = _send_smtp_reply(account, from_email, subject, reply_html,
@@ -666,7 +668,6 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
                 'auto_reply': reply_html[:300],
                 'account':    account['email'],
             })
-            _store_responded_lead(lead['id'], from_email, intent, body_text)
         else:
             print(f"  [FAILED] SMTP auto-reply → {from_email}")
             _log_audit('AUTO_REPLY_FAILED', {
@@ -786,10 +787,13 @@ def _log_agent_decision(from_email: str, intent: str, confidence: float,
         print(f"[AGENT DECISION LOG WARNING] {exc}")
 
 
-def _update_lead_status(email: str, status: str):
+def _update_lead_status(email: str, status: str, responded: bool = True):
     try:
+        update_data = {"outreach_status": status}
+        if responded:
+            update_data["responded"] = True
         supabase.table("leads") \
-            .update({"outreach_status": status}).eq("email", email).execute()
+            .update(update_data).eq("email", email).execute()
     except:
         pass
 
@@ -996,6 +1000,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _log_audit('OPS_TICKET_CREATED', {"from": from_email, "intent": intent})
 
     # ── Step 4: Send reply ─────────────────────────────────────────────────────
+    _store_responded_lead(lead['id'], from_email, intent, body_text)
 
     auto_reply_sent = False
     if reply_html:
@@ -1013,7 +1018,6 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
                 "auto_reply": reply_html[:300],
                 "account":    account['email'],
             })
-            _store_responded_lead(lead['id'], from_email, intent, body_text)
         else:
             print(f"  [FAILED] Auto-reply → {from_email}")
             _log_audit('AUTO_REPLY_FAILED', {
