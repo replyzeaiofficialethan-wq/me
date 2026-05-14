@@ -80,7 +80,7 @@ _GROQ_VALID_INTENTS = {
 
 #── UPDATED: system prompt rewritten for Instant Auto-Reply service ────────────
 _GROQ_SYSTEM_PROMPT = """
-You are an intelligent reply analyzer for ReplyzeAI.
+You are an intelligent reply analyzer for Replyze.
 A real estate agent has replied to a cold outreach email asking: "When a lead texts about {property_address} during a showing, who replies?"
 
 We provide a service that gives instant auto-replies to property inquiries with full context (bedrooms, bathrooms, HOA fees, etc.), so the agent doesn't have to stop what they are doing. This ensures no lead is missed and the agent looks highly professional.
