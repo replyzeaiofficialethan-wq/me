@@ -75,7 +75,7 @@ _groq_cursor: int       = 0
 _GROQ_VALID_INTENTS = {
     'AGENT_HANDLES', 'NOBODY_HANDLES', 'ASSISTANT_HANDLES', 'INTERESTED',
     'ASKS_PRICE', 'ASKS_DETAILS', 'ASKS_IDENTITY', 'ACKNOWLEDGMENT_ONLY',
-    'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'UNKNOWN'
+    'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'NOT_RELEVANT', 'CONFUSED', 'UNKNOWN'
 }
 
 #── UPDATED: system prompt rewritten for Instant Auto-Reply service ────────────
@@ -88,39 +88,46 @@ We provide a service that gives instant auto-replies to property inquiries with 
 Your job is to:
 1. READ and UNDERSTAND exactly what the agent is saying.
 2. Classify their REAL intent.
-3. Write a short, human, conversational reply that escalates them toward a free trial for one property.
+3. Write a short, human, conversational reply that MIRRORS their tone and energy.
 
 CRITICAL RULES:
 - DO NOT MENTION "AI" OR "BOTS". We provide a "service" or "system".
-- Keep it to 2-3 lines max. Warm, professional, and human.
-- Use the sender's name {my_name} at the end of the reply.
+- TONE MIRRORING: If they are brief (e.g. "Me"), be brief. If they are professional, be professional.
+- GRADUAL APPROACH: Acknowledge their situation -> Briefly mention the benefit -> Offer a "Live Preview" (NOT a "free trial").
+- OFFER: Instead of a "free trial", offer to send a "Live Preview" of how the auto-reply would look for {property_address}.
+- Every reply MUST end with: "P.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
+- Keep it to 2-3 lines max + the P.S.
+- Use the sender's name {my_name} at the end of the reply (before the P.S.).
 
 INTENT LABELS:
 AGENT_HANDLES      : They say they handle replies themselves (e.g., "Me", "I do", "I handle it").
 NOBODY_HANDLES     : They say nobody handles it, they miss leads, or it's a problem (e.g., "Nobody", "I usually miss them", "Good question").
 ASSISTANT_HANDLES  : They have an assistant, team, or another service handling it.
-INTERESTED         : They are interested or want to know more, without specifying who currently handles it.
-ASKS_PRICE         : They are asking about pricing / cost. (The trial is free).
-ASKS_DETAILS       : They want to know how the auto-reply system works.
-ASKS_IDENTITY      : They are asking who you are or what company this is.
+INTERESTED         : They are interested or want to know more.
+ASKS_PRICE         : They are asking about pricing / cost. (The preview is free).
+ASKS_DETAILS       : They want to know how the system works.
+ASKS_IDENTITY      : They are asking who you are, what company this is, or if you are a bot.
+NOT_RELEVANT       : They say the property is raw land, sold, or not their listing.
+CONFUSED           : They don't understand the question or the purpose of the email.
 ACKNOWLEDGMENT_ONLY: A brief reply with no clear action — "got it", "ok", signature block only.
 PASS_UNSUB         : They are explicitly declining or asking to be removed.
 NEGATIVE_OBJECTION : Upset, frustrated, or angrily correcting us.
 UNKNOWN            : Cannot determine intent.
 
 REPLY TONE AND OFFER LOGIC:
-- If AGENT_HANDLES: Acknowledge it's a lot of work to stay on top of, especially during showings. Mention our service handles the busy work by instantly giving leads the beds/baths/HOA info they want. Suggest a free trial for one property to save them time.
-- If NOBODY_HANDLES: Highlight that missed leads are missed commissions. Our service ensures every lead gets an instant reply with property details even if they are busy. Suggest a free trial for one property to capture those leads.
-- If ASSISTANT_HANDLES: Suggest our service can supplement their assistant by providing instant, detailed property context 24/7 so nothing slips through.
-- If INTERESTED: Briefly explain the benefit of instant property context and suggest the free trial for one property.
-- If ASKS_PRICE: Mention the small batch/one property pilot is completely free to see the results first.
-- If ASKS_DETAILS: Explain we provide instant auto-replies with property-specific details (beds, baths, HOA, etc.) so leads get info immediately without them lifting a finger.
+- If AGENT_HANDLES: Acknowledge it's a lot to stay on top of while out at showings. Our system handles that busy work by giving leads instant property details. Offer to send a live preview for {property_address}.
+- If NOBODY_HANDLES: Highlight that missed leads are missed commissions. Our service ensures every lead gets an instant reply with details 24/7. Offer a live preview for {property_address}.
+- If NOT_RELEVANT: Acknowledge the specific objection (e.g., "Ah, makes sense if it's raw land—those don't get the same text volume"). Pivot to ask if they have other residential listings where instant info would help.
+- If CONFUSED: Briefly explain you saw their listing for {property_address} and were curious about their lead handling during showings. Explain we provide instant context to leads so they don't have to.
+- If INTERESTED: Briefly explain the benefit of instant property context and offer the live preview.
+- If ASKS_PRICE: Mention the preview/setup for one property is free so they can see the results first.
+- If ASKS_IDENTITY: Confidently explain we are Replyze and we help agents automate property inquiries so no lead is missed.
 
 Respond ONLY with valid JSON:
 {{
   "intent": "INTENT_LABEL",
   "reasoning": "1–2 sentence plain-English explanation",
-  "reply_html": "Your reply — plain text, 2–3 sentences max, warm and human"
+  "reply_html": "Your reply — plain text, 2–3 sentences max, mirroring tone\\n\\n— {my_name}\\n\\nP.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
 }}
 """
 
@@ -211,7 +218,7 @@ def _groq_classify_llm(text: str) -> str | None:
                             "Respond with EXACTLY one label and nothing else:\n"
                             "AGENT_HANDLES | NOBODY_HANDLES | ASSISTANT_HANDLES | INTERESTED | "
                             "ASKS_PRICE | ASKS_DETAILS | ASKS_IDENTITY | ACKNOWLEDGMENT_ONLY |  "
-                            "PASS_UNSUB | NEGATIVE_OBJECTION | UNKNOWN "
+                            "PASS_UNSUB | NEGATIVE_OBJECTION | NOT_RELEVANT | CONFUSED | UNKNOWN "
                         )},
                         {"role": "user",  "content": f"Classify:\n\n{text[:600]}"}
                     ],
@@ -270,6 +277,8 @@ _RE_ACKNOWLEDGMENT = re.compile(
 _RE_AGENT_HANDLES = re.compile(r"\b(i do|me|myself|i handle|i reply)\b", re.I)
 _RE_NOBODY_HANDLES = re.compile(r"\b(nobody|no one|don't have|none|miss)\b", re.I)
 _RE_ASSISTANT_HANDLES = re.compile(r"\b(assistant|team|secretary|va|office)\b", re.I)
+_RE_NOT_RELEVANT = re.compile(r"\b(raw land|land|sold|not my|wrong (listing|property))\b", re.I)
+_RE_CONFUSED = re.compile(r"\b(what (do you mean|is this|are you expecting|kind of response)|is this a sales|confused|don't understand)\b", re.I)
 
 #── Intent classifier ─────────────────────────────────────────────────────────
 def classify_intent(text: str, groq_result: dict | None = None) -> str:
@@ -300,6 +309,12 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
     if _RE_ASSISTANT_HANDLES.search(t):
         return 'ASSISTANT_HANDLES'
 
+    if _RE_NOT_RELEVANT.search(t):
+        return 'NOT_RELEVANT'
+
+    if _RE_CONFUSED.search(t):
+        return 'CONFUSED'
+
     if _RE_PRICE.search(t):
         return 'ASKS_PRICE'
 
@@ -319,32 +334,39 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
     return 'UNKNOWN'
 
 #── Auto-reply templates (Fallbacks) ─────────────────────────────────────────
+def _tmpl_ps() -> str:
+    return "\n\nP.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
+
 def _tmpl_asks_identity(my_name: str) -> str:
     return (
-        f"Hey — I'm with ReplyzeAI. We provide a service that handles instant auto-replies "
+        f"Hey — I'm with Replyze. We provide a service that handles instant auto-replies "
         f"for property inquiries with full context (beds, baths, HOA, etc.) so you never miss a lead while you're busy. "
-        f"Want me to set up a free trial for one of your properties?\n\n— {my_name}"
+        f"Want me to send over a live preview of how it would look for one of your listings?\n\n— {my_name}"
+        f"{_tmpl_ps()}"
     )
 
 def _tmpl_agent_handles(my_name: str) -> str:
     return (
         f"Got it — it's a lot to stay on top of, especially when you're in the middle of a showing. "
         f"Our system handles that busy work by instantly giving leads the beds/baths/HOA info they're looking for. "
-        f"Want to try it out for free on one of your properties?\n\n— {my_name}"
+        f"Want me to send you a live preview of how it looks for one of your properties?\n\n— {my_name}"
+        f"{_tmpl_ps()}"
     )
 
 def _tmpl_nobody_handles(my_name: str) -> str:
     return (
         f"That makes sense — and missed leads usually mean missed commissions. "
         f"We ensure every inquiry gets an instant response with the exact property details they want (beds, baths, HOA, etc.) 24/7. "
-        f"Want me to set up a free trial for one of your properties so you can see how it works?\n\n— {my_name}"
+        f"Want me to send a live preview for one of your listings so you can see how it works?\n\n— {my_name}"
+        f"{_tmpl_ps()}"
     )
 
 def _tmpl_assistant_handles(my_name: str) -> str:
     return (
         f"Makes sense. Our service can actually supplement your team by providing "
         f"instant, detailed property context (beds/baths/HOA) 24/7 so nothing ever slips through the cracks. "
-        f"Want to run a free trial for one of your properties to see the difference?\n\n— {my_name}"
+        f"Want me to send over a live preview for one of your listings to see the difference?\n\n— {my_name}"
+        f"{_tmpl_ps()}"
     )
 
 def _tmpl_interested(my_name: str) -> str:
@@ -352,14 +374,16 @@ def _tmpl_interested(my_name: str) -> str:
         f"Happy to explain — we provide a system that sends instant replies to property inquiries "
         f"with all the info they want (bedrooms, bathrooms, HOA fees, etc.) the second they text in. "
         f"It keeps you looking professional while you're busy with other clients. "
-        f"Want to try it for free on one of your properties this week?\n\n— {my_name}"
+        f"Want me to send a live preview for one of your properties this week?\n\n— {my_name}"
+        f"{_tmpl_ps()}"
     )
 
 def _tmpl_asks_price(my_name: str) -> str:
     return (
-        f"The pilot for one property is completely free so you can see the results first. "
+        f"We can set up a live preview for one property completely free so you can see the results first. "
         f"We only talk pricing once you've seen how many more leads stay engaged. "
-        f"Want me to set it up for one of your listings this week?\n\n— {my_name}"
+        f"Want me to send over a preview for one of your listings?\n\n— {my_name}"
+        f"{_tmpl_ps()}"
     )
 
 def _tmpl_asks_details(my_name: str) -> str:
@@ -367,7 +391,25 @@ def _tmpl_asks_details(my_name: str) -> str:
         f"It's zero manual work on your end. We provide instant auto-replies with "
         f"property-specific details (beds, baths, HOA, etc.) so leads get info immediately "
         f"without you having to stop what you're doing. "
-        f"Want to try a free trial for one property to see it in action?\n\n— {my_name}"
+        f"Want me to send a live preview for one of your properties to see it in action?\n\n— {my_name}"
+        f"{_tmpl_ps()}"
+    )
+
+def _tmpl_not_relevant(my_name: str, property_address: str) -> str:
+    return (
+        f"Ah, that makes sense—{property_address} probably doesn't get the same 'is it still available' heat as a residential listing. "
+        f"Do you have any other residential properties where those quick inquiry texts become a distraction? "
+        f"I'd love to send you a preview of how we handle those.\n\n— {my_name}"
+        f"{_tmpl_ps()}"
+    )
+
+def _tmpl_confused(my_name: str, property_address: str) -> str:
+    return (
+        f"Sorry for the lack of context! I saw your listing for {property_address} and was just curious "
+        f"how you handle those quick property inquiries when you're busy with other clients. "
+        f"We have a system that provides instant info to leads so you don't have to. "
+        f"Want me to send a quick preview of how it works?\n\n— {my_name}"
+        f"{_tmpl_ps()}"
     )
 
 def _tmpl_pass_unsub() -> str:
@@ -637,6 +679,20 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         reply_html = groq_reply or _tmpl_pass_unsub()
         _handle_unsub(from_email)
         _log_audit('UNSUBSCRIBED', {'email': from_email})
+
+    elif intent == 'NOT_RELEVANT':
+        reply_html = groq_reply or _tmpl_not_relevant(my_name, property_address)
+        _log_audit('NOT_RELEVANT', {
+            'from': from_email, 'account': account['email'],
+        })
+        _update_lead_status(from_email, 'not_relevant')
+
+    elif intent == 'CONFUSED':
+        reply_html = groq_reply or _tmpl_confused(my_name, property_address)
+        _log_audit('CONFUSED', {
+            'from': from_email, 'account': account['email'],
+        })
+        _update_lead_status(from_email, 'confused')
 
     elif intent == 'NEGATIVE_OBJECTION':
         reply_html = groq_reply or _tmpl_negative_objection()
@@ -981,6 +1037,22 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         reply_html = groq_reply or _tmpl_pass_unsub()
         _handle_unsub(from_email)
         _log_audit('UNSUBSCRIBED', {"email": from_email})
+
+    elif intent == 'NOT_RELEVANT':
+        reply_html = groq_reply or _tmpl_not_relevant(my_name, property_address)
+        _log_audit('NOT_RELEVANT', {
+            "from":    from_email,
+            "account": account['email'],
+        })
+        _update_lead_status(from_email, 'not_relevant')
+
+    elif intent == 'CONFUSED':
+        reply_html = groq_reply or _tmpl_confused(my_name, property_address)
+        _log_audit('CONFUSED', {
+            "from":    from_email,
+            "account": account['email'],
+        })
+        _update_lead_status(from_email, 'confused')
 
     elif intent == 'NEGATIVE_OBJECTION':
         reply_html = groq_reply or _tmpl_negative_objection()
