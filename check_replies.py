@@ -83,30 +83,31 @@ _GROQ_SYSTEM_PROMPT = """
 You are an intelligent reply analyzer for Replyze.
 A real estate agent has replied to a cold outreach email asking: "When a lead texts about {property_address} during a showing, who replies?"
 
-We provide a service that gives instant auto-replies to property inquiries with full context (bedrooms, bathrooms, HOA fees, etc.), so the agent doesn't have to stop what they are doing. This ensures no lead is missed and the agent looks highly professional.
+We provide a "backup coverage" service that handles instant auto-replies for property inquiries with full context (beds, baths, HOA, etc.). This ensures no lead is lost when an agent is busy, driving, or sleeping.
 
 Your job is to:
 1. READ and UNDERSTAND exactly what the agent is saying.
 2. Classify their REAL intent.
-3. Write a short, human, conversational reply that MIRRORS their tone and energy.
+3. Write a short, human, conversational reply using the VALIDATION -> GAP -> SUPPORT framework.
 
 CRITICAL RULES:
-- DO NOT MENTION "AI" OR "BOTS". We provide a "service" or "system".
+- VALIDATION: Always praise/validate the agent's current process first (e.g., "Love that—nothing beats that personal touch"). Never attack their work ethic.
+- THE GAP: Highlight the "Situational Gap"—times when they physically CANNOT reply (listing presentations, driving, open houses, 2 AM).
+- SUPPORT: Position the system as "backup coverage" or an "assistant," NOT a replacement for the agent.
 - TONE MIRRORING: If they are brief (e.g. "Me"), be brief. If they are professional, be professional.
-- GRADUAL APPROACH: Acknowledge their situation -> Briefly mention the benefit -> Offer a "Live Preview" (NOT a "free trial").
-- OFFER: Instead of a "free trial", offer to send a "Live Preview" of how the auto-reply would look for {property_address}.
-- Every reply MUST end with: "P.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
-- Keep it to 2-3 lines max + the P.S.
+- OFFER: Instead of a "free trial," offer a "Live Preview" or "Quick Example" for {property_address}.
+- P.S.: Every reply MUST end with: "P.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
+- DO NOT MENTION "AI" OR "BOTS".
 - Use the sender's name {my_name} at the end of the reply (before the P.S.).
 
 INTENT LABELS:
 AGENT_HANDLES      : They say they handle replies themselves (e.g., "Me", "I do", "I handle it").
-NOBODY_HANDLES     : They say nobody handles it, they miss leads, or it's a problem (e.g., "Nobody", "I usually miss them", "Good question").
+NOBODY_HANDLES     : They say nobody handles it, they miss leads, or it's a problem.
 ASSISTANT_HANDLES  : They have an assistant, team, or another service handling it.
 INTERESTED         : They are interested or want to know more.
 ASKS_PRICE         : They are asking about pricing / cost. (The preview is free).
 ASKS_DETAILS       : They want to know how the system works.
-ASKS_IDENTITY      : They are asking who you are, what company this is, or if you are a bot.
+ASKS_IDENTITY      : They are asking who you are or what company this is.
 NOT_RELEVANT       : They say the property is raw land, sold, or not their listing.
 CONFUSED           : They don't understand the question or the purpose of the email.
 ACKNOWLEDGMENT_ONLY: A brief reply with no clear action — "got it", "ok", signature block only.
@@ -115,13 +116,11 @@ NEGATIVE_OBJECTION : Upset, frustrated, or angrily correcting us.
 UNKNOWN            : Cannot determine intent.
 
 REPLY TONE AND OFFER LOGIC:
-- If AGENT_HANDLES: Acknowledge it's a lot to stay on top of while out at showings. Our system handles that busy work by giving leads instant property details. Offer to send a live preview for {property_address}.
-- If NOBODY_HANDLES: Highlight that missed leads are missed commissions. Our service ensures every lead gets an instant reply with details 24/7. Offer a live preview for {property_address}.
-- If NOT_RELEVANT: Acknowledge the specific objection (e.g., "Ah, makes sense if it's raw land—those don't get the same text volume"). Pivot to ask if they have other residential listings where instant info would help.
-- If CONFUSED: Briefly explain you saw their listing for {property_address} and were curious about their lead handling during showings. Explain we provide instant context to leads so they don't have to.
-- If INTERESTED: Briefly explain the benefit of instant property context and offer the live preview.
-- If ASKS_PRICE: Mention the preview/setup for one property is free so they can see the results first.
-- If ASKS_IDENTITY: Confidently explain we are Replyze and we help agents automate property inquiries so no lead is missed.
+- If AGENT_HANDLES: "Love that—most top agents say the same because nothing beats that personal touch. The only reason I ask is because even the best agents lose leads when they're stuck in a 2-hour presentation or driving. I built a quick example for {property_address} to show how we provide backup coverage during those gaps. Worth a quick look, or are you completely set on your current setup?"
+- If NOBODY_HANDLES: Acknowledge that missed leads are missed commissions. Position the service as the safety net that's always on.
+- If ASSISTANT_HANDLES: Validate having a team is great. Suggest our system as the "24/7 supplement" for when the assistant is off-clock.
+- If NOT_RELEVANT: "Ah, makes sense—{property_address} probably doesn't get the same 'is it still available' heat as residential. Do you have any residential listings where those quick inquiry texts become a distraction?"
+- If CONFUSED: "Sorry for the lack of context! I saw your listing for {property_address} and was curious how you handle inquiries when you're busy with other clients. We provide backup coverage so leads get instant info even when you're tied up."
 
 Respond ONLY with valid JSON:
 {{
@@ -347,24 +346,24 @@ def _tmpl_asks_identity(my_name: str) -> str:
 
 def _tmpl_agent_handles(my_name: str) -> str:
     return (
-        f"Got it — it's a lot to stay on top of, especially when you're in the middle of a showing. "
-        f"Our system handles that busy work by instantly giving leads the beds/baths/HOA info they're looking for. "
-        f"Want me to send you a live preview of how it looks for one of your properties?\n\n— {my_name}"
+        f"Love that—most top agents say the same because nothing beats that personal touch. "
+        f"The only reason I ask is because even the best agents lose leads when they're stuck in a meeting or driving. "
+        f"I built a quick example to show how we provide backup coverage during those gaps. Worth a look, or are you completely set?\n\n— {my_name}"
         f"{_tmpl_ps()}"
     )
 
 def _tmpl_nobody_handles(my_name: str) -> str:
     return (
-        f"That makes sense — and missed leads usually mean missed commissions. "
-        f"We ensure every inquiry gets an instant response with the exact property details they want (beds, baths, HOA, etc.) 24/7. "
-        f"Want me to send a live preview for one of your listings so you can see how it works?\n\n— {my_name}"
+        f"That makes sense—and missed leads usually mean missed commissions. "
+        f"We act as a safety net that ensures every inquiry gets an instant response with property details 24/7, even when you're busy. "
+        f"Want me to send a quick example for one of your listings so you can see how it works?\n\n— {my_name}"
         f"{_tmpl_ps()}"
     )
 
 def _tmpl_assistant_handles(my_name: str) -> str:
     return (
-        f"Makes sense. Our service can actually supplement your team by providing "
-        f"instant, detailed property context (beds/baths/HOA) 24/7 so nothing ever slips through the cracks. "
+        f"Makes sense—having a team is huge. Our service actually supplements your assistant by "
+        f"providing instant property context 24/7 so nothing ever slips through when they're off-clock. "
         f"Want me to send over a live preview for one of your listings to see the difference?\n\n— {my_name}"
         f"{_tmpl_ps()}"
     )
