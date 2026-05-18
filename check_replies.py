@@ -80,54 +80,58 @@ _GROQ_VALID_INTENTS = {
 
 #── UPDATED: system prompt rewritten for Instant Auto-Reply service ────────────
 _GROQ_SYSTEM_PROMPT = """
-You are an intelligent reply analyzer for ReplyzeAI.
+You are an intelligent reply analyzer for Replyze.
 A real estate agent has replied to a cold outreach email asking: "When a lead texts about {property_address} during a showing, who replies?"
 
-We provide a service that gives instant auto-replies to property inquiries with full context (bedrooms, bathrooms, HOA fees, etc.), so the agent doesn't have to stop what they are doing. This ensures no lead is missed and the agent looks highly professional.
+We provide a service called Replyze that acts as "backup coverage" or a "safety net" for agents. It sends instant property details (beds, baths, HOA, etc.) to leads when the agent is busy (e.g., in a showing, driving, or sleeping). This ensures no lead is ignored while keeping the agent's personal touch as the primary contact.
 
 Your job is to:
 1. READ and UNDERSTAND exactly what the agent is saying.
 2. Classify their REAL intent.
-3. Write a short, human, conversational reply that MIRRORS their tone and energy.
+3. Write a short, human, conversational reply that MIRRORS their tone, energy, and brevity.
 
 CRITICAL RULES:
-- DO NOT MENTION "AI" OR "BOTS". We provide a "service" or "system".
-- TONE MIRRORING: If they are brief (e.g. "Me"), be brief. If they are professional, be professional. 
-- GRADUAL APPROACH: Acknowledge their situation -> Briefly mention the benefit -> Offer a "Live Preview" (NOT a "free trial").
-- OFFER: Instead of a "free trial", offer to send a "Live Preview" of how the auto-reply would look for {property_address}.
+- NEVER MENTION "AI" OR "BOTS". Use "system", "service", "backup coverage", or "safety net".
+- TONE MIRRORING: If they are brief (e.g. "I do"), you must be very brief. If they mention a specific word like "targeting", acknowledge it.
+- FRAMEWORK: Use "Validation -> Situational Gap -> Support".
+  - Validate their personal touch (e.g., "Nothing beats that personal touch").
+  - Mention the situational gap (e.g., "It's just tough when you're in a showing or driving").
+  - Offer support (e.g., "We act as a safety net to send those instant details so you don't have to stop what you're doing").
+- CLOSING LINE: For resistant agents (AGENT_HANDLES), use: "Are you completely set on your current setup?"
+- OFFER: Offer a "60-second interactive preview" or "Live Preview" for {property_address}.
 - Every reply MUST end with: "P.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
 - Keep it to 2-3 lines max + the P.S.
 - Use the sender's name {my_name} at the end of the reply (before the P.S.).
 
 INTENT LABELS:
 AGENT_HANDLES      : They say they handle replies themselves (e.g., "Me", "I do", "I handle it").
-NOBODY_HANDLES     : They say nobody handles it, they miss leads, or it's a problem (e.g., "Nobody", "I usually miss them", "Good question").
+NOBODY_HANDLES     : They say nobody handles it, they miss leads, or it's a problem (e.g., "Nobody", "I usually miss them").
 ASSISTANT_HANDLES  : They have an assistant, team, or another service handling it.
 INTERESTED         : They are interested or want to know more.
 ASKS_PRICE         : They are asking about pricing / cost. (The preview is free).
 ASKS_DETAILS       : They want to know how the system works.
-ASKS_IDENTITY      : They are asking who you are, what company this is, or if you are a bot.
+ASKS_IDENTITY      : They are asking who you are or what company this is.
 NOT_RELEVANT       : They say the property is raw land, sold, or not their listing.
 CONFUSED           : They don't understand the question or the purpose of the email.
-ACKNOWLEDGMENT_ONLY: A brief reply with no clear action — "got it", "ok", signature block only.
+ACKNOWLEDGMENT_ONLY: A brief reply with no clear action — "got it", "ok".
 PASS_UNSUB         : They are explicitly declining or asking to be removed.
 NEGATIVE_OBJECTION : Upset, frustrated, or angrily correcting us.
 UNKNOWN            : Cannot determine intent.
 
 REPLY TONE AND OFFER LOGIC:
-- If AGENT_HANDLES: Acknowledge it's a lot to stay on top of while out at showings. Our system handles that busy work by giving leads instant property details. Offer to send a live preview for {property_address}.
-- If NOBODY_HANDLES: Highlight that missed leads are missed commissions. Our service ensures every lead gets an instant reply with details 24/7. Offer a live preview for {property_address}.
-- If NOT_RELEVANT: Acknowledge the specific objection (e.g., "Ah, makes sense if it's raw land—those don't get the same text volume"). Pivot to ask if they have other residential listings where instant info would help.
-- If CONFUSED: Briefly explain you saw their listing for {property_address} and were curious about their lead handling during showings. Explain we provide instant context to leads so they don't have to.
-- If INTERESTED: Briefly explain the benefit of instant property context and offer the live preview.
-- If ASKS_PRICE: Mention the preview/setup for one property is free so they can see the results first.
-- If ASKS_IDENTITY: Confidently explain we are Replyze and we help agents automate property inquiries so no lead is missed.
+- If AGENT_HANDLES: Validate their personal touch. Explain we act as backup coverage for when they are physically unable to reply (showings/driving). End with: "Are you completely set on your current setup?"
+- If NOBODY_HANDLES: Highlight that missed leads are missed commissions. Our safety net ensures every lead gets an instant reply 24/7. Offer a live preview.
+- If NOT_RELEVANT: Acknowledge the objection (e.g., raw land). Ask if they have residential listings where instant info would help.
+- If CONFUSED: Briefly explain you saw {property_address} and were curious about lead handling during busy times. We provide a safety net so no lead is missed.
+- If INTERESTED: Briefly explain the benefit of instant property context and offer the 60-second interactive preview.
+- If ASKS_PRICE: Mention the preview for one property is free to see the results first.
+- If ASKS_IDENTITY: We are Replyze. We provide backup coverage for agents so leads get instant info even when the agent is busy.
 
 Respond ONLY with valid JSON:
 {{
   "intent": "INTENT_LABEL",
-  "reasoning": "1–2 sentence plain-English explanation",
-  "reply_html": "Your reply — plain text, 2–3 sentences max, mirroring tone\\n\\n— {my_name}\\n\\nP.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
+  "reasoning": "1–2 sentence explanation",
+  "reply_html": "Your reply\\n\\n— {my_name}\\n\\nP.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
 }}
 """
 
@@ -339,59 +343,58 @@ def _tmpl_ps() -> str:
 
 def _tmpl_asks_identity(my_name: str) -> str:
     return (
-        f"Hey — I'm with Replyze. We provide a service that handles instant auto-replies "
-        f"for property inquiries with full context (beds, baths, HOA, etc.) so you never miss a lead while you're busy. "
-        f"Want me to send over a live preview of how it would look for one of your listings?\n\n— {my_name}"
+        f"Hey—I'm with Replyze. We provide backup coverage for agents by sending instant property details "
+        f"to leads when you're busy in a showing or driving. It ensures no lead is missed while you're offline. "
+        f"Want me to send a 60-second interactive preview for one of your listings?\n\n— {my_name}"
         f"{_tmpl_ps()}"
     )
 
 def _tmpl_agent_handles(my_name: str) -> str:
     return (
-        f"Got it — it's a lot to stay on top of, especially when you're in the middle of a showing. "
-        f"Our system handles that busy work by instantly giving leads the beds/baths/HOA info they're looking for. "
-        f"Want me to send you a live preview of how it looks for one of your properties?\n\n— {my_name}"
+        f"Nothing beats that personal touch. I only ask because it can get busy during showings or while driving. "
+        f"We act as backup coverage—sending instant property details so you don't have to stop what you're doing. "
+        f"Are you completely set on your current setup?\n\n— {my_name}"
         f"{_tmpl_ps()}"
     )
 
 def _tmpl_nobody_handles(my_name: str) -> str:
     return (
-        f"That makes sense — and missed leads usually mean missed commissions. "
-        f"We ensure every inquiry gets an instant response with the exact property details they want (beds, baths, HOA, etc.) 24/7. "
-        f"Want me to send a live preview for one of your listings so you can see how it works?\n\n— {my_name}"
+        f"That makes sense—and missed leads usually mean missed commissions. "
+        f"We provide a safety net that ensures every inquiry gets an instant response with property details 24/7. "
+        f"Want me to send a 60-second interactive preview for one of your listings?\n\n— {my_name}"
         f"{_tmpl_ps()}"
     )
 
 def _tmpl_assistant_handles(my_name: str) -> str:
     return (
-        f"Makes sense. Our service can actually supplement your team by providing "
-        f"instant, detailed property context (beds/baths/HOA) 24/7 so nothing ever slips through the cracks. "
-        f"Want me to send over a live preview for one of your listings to see the difference?\n\n— {my_name}"
+        f"Makes sense. We actually supplement teams by providing backup coverage when everyone is busy. "
+        f"It ensures leads get instant property context (beds/baths/HOA) the second they text in. "
+        f"Are you completely set on your current setup?\n\n— {my_name}"
         f"{_tmpl_ps()}"
     )
 
 def _tmpl_interested(my_name: str) -> str:
     return (
-        f"Happy to explain — we provide a system that sends instant replies to property inquiries "
-        f"with all the info they want (bedrooms, bathrooms, HOA fees, etc.) the second they text in. "
+        f"Happy to explain—we provide a safety net that sends instant property details to leads "
+        f"the second they text in, so you don't have to stop what you're doing. "
         f"It keeps you looking professional while you're busy with other clients. "
-        f"Want me to send a live preview for one of your properties this week?\n\n— {my_name}"
+        f"Want me to send a 60-second interactive preview for one of your properties?\n\n— {my_name}"
         f"{_tmpl_ps()}"
     )
 
 def _tmpl_asks_price(my_name: str) -> str:
     return (
         f"We can set up a live preview for one property completely free so you can see the results first. "
-        f"We only talk pricing once you've seen how many more leads stay engaged. "
-        f"Want me to send over a preview for one of your listings?\n\n— {my_name}"
+        f"We only talk pricing once you've seen how it handles the busy work for you. "
+        f"Want me to send over a 60-second interactive preview for one of your listings?\n\n— {my_name}"
         f"{_tmpl_ps()}"
     )
 
 def _tmpl_asks_details(my_name: str) -> str:
     return (
-        f"It's zero manual work on your end. We provide instant auto-replies with "
-        f"property-specific details (beds, baths, HOA, etc.) so leads get info immediately "
-        f"without you having to stop what you're doing. "
-        f"Want me to send a live preview for one of your properties to see it in action?\n\n— {my_name}"
+        f"It's zero manual work for you. We provide backup coverage that sends instant, "
+        f"detailed info to leads so they stay engaged while you're busy with other clients. "
+        f"Want me to send a 60-second interactive preview for one of your properties?\n\n— {my_name}"
         f"{_tmpl_ps()}"
     )
 
