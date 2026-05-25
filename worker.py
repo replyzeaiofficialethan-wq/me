@@ -165,7 +165,9 @@ def get_gmail_access_token(encrypted_refresh_token: str) -> str | None:
 
 
 def send_email_via_gmail(account: dict, to_email: str,
-                          subject: str, html_body: str) -> bool:
+                          subject: str, html_body: str,
+                          thread_id: str = None, in_reply_to: str = None,
+                          references: str = None) -> bool:
     access_token = get_gmail_access_token(account["encrypted_refresh_token"])
     if not access_token:
         print(f"[GMAIL] Cannot get access token for {account['email']}")
@@ -177,7 +179,15 @@ def send_email_via_gmail(account: dict, to_email: str,
         msg["From"]    = f"{account['display_name']} <{account['email']}>"
         msg["Subject"] = subject
 
+        if in_reply_to:
+            msg["In-Reply-To"] = in_reply_to
+            msg["References"]  = references or in_reply_to
+
         raw_b64url = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8").rstrip("=")
+
+        payload = {"raw": raw_b64url}
+        if thread_id:
+            payload["threadId"] = thread_id
 
         resp = requests.post(
             GOOGLE_GMAIL_SEND,
@@ -185,7 +195,7 @@ def send_email_via_gmail(account: dict, to_email: str,
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type":  "application/json",
             },
-            json={"raw": raw_b64url},
+            json=payload,
             timeout=30,
         )
 
@@ -202,7 +212,8 @@ def send_email_via_gmail(account: dict, to_email: str,
 
 
 def send_email_via_smtp(account: dict, to_email: str,
-                        subject: str, html_body: str) -> bool:
+                        subject: str, html_body: str,
+                        in_reply_to: str = None, references: str = None) -> bool:
     """Send one email via plain SMTP using stored credentials."""
     try:
         password    = aesgcm_decrypt(account["encrypted_smtp_password"])
@@ -213,6 +224,11 @@ def send_email_via_smtp(account: dict, to_email: str,
         msg["Subject"] = subject
         msg["From"]    = f"{sender_name} <{account['email']}>"
         msg["To"]      = to_email
+
+        if in_reply_to:
+            msg["In-Reply-To"] = in_reply_to
+            msg["References"]  = references or in_reply_to
+
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
         if port == 465:
@@ -530,7 +546,22 @@ def send_queued():
           f"(per-run cap={MAX_EMAILS_PER_RUN}, hourly remaining={hourly_remaining})")
 
     # ── Claim emails atomically ───────────────────────────────────────────────
-    queued = claim_emails(fetch_limit)
+    # Modified claim logic to include new threading columns
+    now             = datetime.now(timezone.utc)
+    stale_threshold = (now - timedelta(minutes=10)).isoformat()
+
+    try:
+        # Note: RPC claim_emails needs to return the new columns too if it doesn't already
+        # Assuming * in the RPC returns all columns.
+        result = supabase.rpc("claim_emails", {
+            "p_limit": fetch_limit,
+            "p_now":   now.isoformat(),
+            "p_stale": stale_threshold,
+        }).execute()
+        queued = result.data if result.data else []
+    except Exception as e:
+        print(f"[CLAIM ERROR] {e}")
+        queued = []
     print(f"Emails claimed for this run: {len(queued)}")
 
     if not queued:
@@ -566,34 +597,50 @@ def send_queued():
     for q in queued:
 
         # ── Pick account ──────────────────────────────────────────────────
-        assigned = get_account_for_lead_campaign(q["lead_id"], q["campaign_id"])
-
-        if assigned:
+        # Check if this is an auto-reply with a fixed sender
+        if q.get("sent_from"):
+            fixed_sender = q["sent_from"]
             found = next(
                 (a for a in available
-                 if a["account"]["email"] == assigned["email"]
+                 if a["account"]["email"] == fixed_sender
                  and a["remaining"] > 0),
                 None
             )
             if not found:
-                print(f"[SKIP] {q['lead_email']} – assigned account exhausted today")
-                unclaim_email(q["id"])  # release so next day's worker can retry
+                # If the fixed sender is exhausted, we must wait (don't randomize replies)
+                print(f"[SKIP] {q['lead_email']} – fixed sender {fixed_sender} exhausted today")
+                unclaim_email(q["id"])
                 continue
             acct_data = found
+            account = acct_data["account"]
         else:
-            if total_accnts == 0:
-                print("All accounts exhausted mid-batch.")
-                unclaim_email(q["id"])
-                break
-            acct_index = acct_index % total_accnts
-            acct_data  = available[acct_index]
-            assign_account_to_lead_campaign(
-                q["lead_id"], q["campaign_id"],
-                acct_data["account"]["email"],
-                sender_type=acct_data["account"].get("_type", "gmail"),
-            )
+            assigned = get_account_for_lead_campaign(q["lead_id"], q["campaign_id"])
 
-        account       = acct_data["account"]
+            if assigned:
+                found = next(
+                    (a for a in available
+                     if a["account"]["email"] == assigned["email"]
+                     and a["remaining"] > 0),
+                    None
+                )
+                if not found:
+                    print(f"[SKIP] {q['lead_email']} – assigned account exhausted today")
+                    unclaim_email(q["id"])  # release so next day's worker can retry
+                    continue
+                acct_data = found
+            else:
+                if total_accnts == 0:
+                    print("All accounts exhausted mid-batch.")
+                    unclaim_email(q["id"])
+                    break
+                acct_index = acct_index % total_accnts
+                acct_data  = available[acct_index]
+                assign_account_to_lead_campaign(
+                    q["lead_id"], q["campaign_id"],
+                    acct_data["account"]["email"],
+                    sender_type=acct_data["account"].get("_type", "gmail"),
+                )
+            account = acct_data["account"]
         current_count = acct_data["sent_today"]
 
         # ── Send ──────────────────────────────────────────────────────────
@@ -615,17 +662,22 @@ def send_queued():
             account_type = account.get("_type", "gmail")
             if account_type == "smtp":
                 ok = send_email_via_smtp(
-                    account   = account,
-                    to_email  = q["lead_email"],
-                    subject   = final_subject,
-                    html_body = tracked_body,
+                    account     = account,
+                    to_email    = q["lead_email"],
+                    subject     = final_subject,
+                    html_body   = tracked_body,
+                    in_reply_to = q.get("in_reply_to"),
+                    references  = q.get("references")
                 )
             else:
                 ok = send_email_via_gmail(
-                    account   = account,
-                    to_email  = q["lead_email"],
-                    subject   = final_subject,
-                    html_body = tracked_body,
+                    account     = account,
+                    to_email    = q["lead_email"],
+                    subject     = final_subject,
+                    html_body   = tracked_body,
+                    thread_id   = q.get("thread_id"),
+                    in_reply_to = q.get("in_reply_to"),
+                    references  = q.get("references")
                 )
 
             if ok:
@@ -643,7 +695,8 @@ def send_queued():
                 acct_data["remaining"]  = DAILY_LIMIT - new_count
 
                 if new_count >= DAILY_LIMIT:
-                    available.pop(acct_index)
+                    # Find and remove from available by email
+                    available = [a for a in available if a["account"]["email"] != account["email"]]
                     total_accnts = len(available)
                     if total_accnts == 0:
                         print("All accounts hit daily limit – stopping batch.")
@@ -651,9 +704,11 @@ def send_queued():
                     if acct_index >= total_accnts:
                         acct_index = 0
                 else:
-                    acct_index += 1
+                    acct_index = (acct_index + 1) % max(total_accnts, 1)
 
-                schedule_followup(q, q["sequence"] + 1, account["email"])
+                # Only schedule follow-up if this wasn't an auto-reply (sequence 999)
+                if q["sequence"] < 900:
+                    schedule_followup(q, q["sequence"] + 1, account["email"])
                 sent_count += 1
                 print(f"[SENT] {q['lead_email']} via {account['email']} "
                       f"[{account.get('_type','gmail').upper()}]  "

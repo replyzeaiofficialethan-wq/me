@@ -10,7 +10,9 @@ import email as email_lib
 import email.utils
 import email.header
 import requests
-from datetime import datetime, timezone
+import pytz
+import random
+from datetime import datetime, timezone, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from supabase import create_client
@@ -83,32 +85,54 @@ _GROQ_SYSTEM_PROMPT = """
 You are an intelligent reply analyzer for Replyze.
 A real estate agent has replied to a cold outreach email asking: "When a lead texts about {property_address} during a showing, who replies?"
 
-We provide a service called Replyze that acts as "backup coverage" or a "safety net" for agents. It sends instant property details (beds, baths, HOA, etc.) to leads when the agent is busy (e.g., in a showing, driving, or sleeping). This ensures no lead is ignored while keeping the agent's personal touch as the primary contact.
+We provide a service called Replyze.
 
 Your job is to:
 1. READ and UNDERSTAND exactly what the agent is saying.
 2. Classify their REAL intent.
 3. Write a short, human, conversational reply that MIRRORS their tone, energy, and brevity.
 
+CONVERSATION STATE:
+{conversation_state}
+
 CRITICAL RULES:
-- NEVER MENTION "AI" OR "BOTS". Use "system", "service", "backup coverage", or "safety net".
+- NEVER MENTION "AI" OR "BOTS". Use "system", "service", "speed-to-lead", "handling inbound while busy", "keeping leads warm", or "covering gaps during showings".
+- DO NOT use "backup coverage", "safety net", "interactive preview", or "live preview".
 - TONE MIRRORING: If they are brief (e.g. "I do"), you must be very brief. If they mention a specific word like "targeting", acknowledge it.
-- FRAMEWORK: Use "Validation -> Situational Gap -> Support". 
-  - Validate their personal touch (e.g., "Nothing beats that personal touch").
-  - Mention the situational gap (e.g., "It's just tough when you're in a showing or driving").
-  - Offer support (e.g., "We act as a safety net to send those instant details so you don't have to stop what you're doing").
-- CLOSING LINE: For resistant agents (AGENT_HANDLES), use: "Are you completely set on your current setup?"
-- OFFER: Offer a "60-second interactive preview" or "Live Preview" for {property_address}.
-- Every reply MUST end with: "P.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
-- Keep it to 2-3 lines max + the P.S.
-- Use the sender's name {my_name} at the end of the reply (before the P.S.).
+- FRAMEWORK:
+  Keep conversations natural and progressive.
+
+  FIRST REPLY (if product_introduced is false):
+  - validate briefly,
+  - deepen awareness of the operational issue (e.g. back-to-back showings, driving),
+  - ask a low-friction, simple conversational follow-up question.
+  - DO NOT pitch the product yet.
+  - DO NOT ask if they are set on their current setup.
+
+  ONLY AFTER engagement (if product_introduced is true):
+  - explain the service briefly (handling inbound property inquiries instantly),
+  - tie it to speed-to-lead and missed opportunities,
+  - then offer a preview/demo.
+
+- HUMANIZATION:
+  - Vary sentence length naturally.
+  - Sometimes be extremely brief.
+  - Avoid repetitive phrases.
+  - Avoid corporate/startup wording.
+  - Replies should feel like casual email conversation, not marketing copy.
+  - Avoid sounding like LinkedIn marketing copy or polished startup phrasing.
+  - Write like a normal person emailing another normal person.
+
+- FORBIDDEN WORDS: leverage, optimize, seamless, streamline, automate, cutting-edge, solution, platform, innovative, efficiency, workflow, maximize, enhance, AI-powered, intelligent assistant, game changer, frictionless, revolutionize, ecosystem, robust, scalable.
+
+- Use the sender's name {my_name} at the end of the reply.
 
 INTENT LABELS:
 AGENT_HANDLES      : They say they handle replies themselves (e.g., "Me", "I do", "I handle it").
 NOBODY_HANDLES     : They say nobody handles it, they miss leads, or it's a problem (e.g., "Nobody", "I usually miss them").
 ASSISTANT_HANDLES  : They have an assistant, team, or another service handling it.
 INTERESTED         : They are interested or want to know more.
-ASKS_PRICE         : They are asking about pricing / cost. (The preview is free).
+ASKS_PRICE         : They are asking about pricing / cost.
 ASKS_DETAILS       : They want to know how the system works.
 ASKS_IDENTITY      : They are asking who you are or what company this is.
 NOT_RELEVANT       : They say the property is raw land, sold, or not their listing.
@@ -118,24 +142,28 @@ PASS_UNSUB         : They are explicitly declining or asking to be removed.
 NEGATIVE_OBJECTION : Upset, frustrated, or angrily correcting us.
 UNKNOWN            : Cannot determine intent.
 
-REPLY TONE AND OFFER LOGIC:
-- If AGENT_HANDLES: Validate their personal touch. Explain we act as backup coverage for when they are physically unable to reply (showings/driving). End with: "Are you completely set on your current setup?"
-- If NOBODY_HANDLES: Highlight that missed leads are missed commissions. Our safety net ensures every lead gets an instant reply 24/7. Offer a live preview.
-- If NOT_RELEVANT: Acknowledge the objection (e.g., raw land). Ask if they have residential listings where instant info would help.
-- If CONFUSED: Briefly explain you saw {property_address} and were curious about lead handling during busy times. We provide a safety net so no lead is missed.
-- If INTERESTED: Briefly explain the benefit of instant property context and offer the 60-second interactive preview.
-- If ASKS_PRICE: Mention the preview for one property is free to see the results first.
-- If ASKS_IDENTITY: We are Replyze. We provide backup coverage for agents so leads get instant info even when the agent is busy.
+REPLY LOGIC:
+- If AGENT_HANDLES:
+  DO NOT immediately pitch the product.
+  DO NOT ask if they are set on their current setup.
+  Instead: briefly validate, mention a relatable operational situation (showings/driving), ask a simple conversational follow-up question.
+  Example: "Makes sense. Most agents I talk to reply themselves too — it just gets tough during back-to-back showings or while driving. Do you usually answer those leads immediately or once you're free?"
+
+- If ASSISTANT_HANDLES:
+  Example: "Gotcha — a lot of teams I talk to already have someone helping with inbound. Out of curiosity, do leads ever still sit for a bit during busy hours or is response time pretty locked in?"
+
+- If INTERESTED:
+  Example: "Mainly helps with speed-to-lead. If someone inquires while you're in a showing, driving, or offline, they instantly get property details and basic questions handled until you jump back in personally. Happy to show you a couple real examples if helpful."
 
 Respond ONLY with valid JSON:
 {{
   "intent": "INTENT_LABEL",
   "reasoning": "1–2 sentence explanation",
-  "reply_html": "Your reply\\n\\n— {my_name}\\n\\nP.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
+  "reply_html": "Your reply\\n\\n— {my_name}"
 }}
 """
 
-def _groq_analyze_reply(text: str, property_address: str = "your listing", my_name: str = "the team") -> dict | None:
+def _groq_analyze_reply(text: str, property_address: str = "your listing", my_name: str = "the team", conversation_state: dict | None = None) -> dict | None:
     """
     Primary intelligence layer.
     Calls Groq to READ the reply, classify intent properly, and generate
@@ -147,9 +175,11 @@ def _groq_analyze_reply(text: str, property_address: str = "your listing", my_na
     if not GROQ_KEYS:
         return None
     
+    state_str = json.dumps(conversation_state or {}, indent=2)
     system_prompt = _GROQ_SYSTEM_PROMPT.format(
         property_address=property_address,
-        my_name=my_name
+        my_name=my_name,
+        conversation_state=state_str
     )
 
     for _ in range(len(GROQ_KEYS)):
@@ -166,7 +196,7 @@ def _groq_analyze_reply(text: str, property_address: str = "your listing", my_na
                         {"role": "system", "content": system_prompt},
                         {"role": "user",   "content": f"Analyze this reply:\n\n{text[:1200]}"},
                     ],
-                    "temperature": 0.3,
+                    "temperature": 0.7,
                     "max_tokens":  400,
                     "response_format": {"type": "json_object"},
                 },
@@ -343,76 +373,67 @@ def _tmpl_ps() -> str:
 
 def _tmpl_asks_identity(my_name: str) -> str:
     return (
-        f"Hey—I'm with Replyze. We provide backup coverage for agents by sending instant property details "
-        f"to leads when you're busy in a showing or driving. It ensures no lead is missed while you're offline. "
-        f"Want me to send a 60-second interactive preview for one of your listings?\n\n— {my_name}"
-        f"{_tmpl_ps()}"
+        f"Hey—I'm with Replyze. We help with speed-to-lead by handling inbound property inquiries "
+        f"instantly when you're busy in a showing or driving. It ensures no lead is missed while you're offline. "
+        f"Happy to show you a couple real examples if helpful.\n\n— {my_name}"
     )
 
 def _tmpl_agent_handles(my_name: str) -> str:
     return (
-        f"Nothing beats that personal touch. I only ask because it can get busy during showings or while driving. "
-        f"We act as backup coverage—sending instant property details so you don't have to stop what you're doing. "
-        f"Are you completely set on your current setup?\n\n— {my_name}"
-        f"{_tmpl_ps()}"
+        f"Makes sense. Most agents I talk to reply themselves too — it usually gets tricky during back-to-back showings or while driving.\n\n"
+        f"Do you usually answer those leads right away or once you're free?\n\n"
+        f"— {my_name}"
     )
 
 def _tmpl_nobody_handles(my_name: str) -> str:
     return (
-        f"That makes sense—and missed leads usually mean missed commissions. "
-        f"We provide a safety net that ensures every inquiry gets an instant response with property details 24/7. "
-        f"Want me to send a 60-second interactive preview for one of your listings?\n\n— {my_name}"
-        f"{_tmpl_ps()}"
+        f"That makes sense—and missed leads usually mean missed commissions.\n\n"
+        f"Do leads ever sit for a bit during busy hours or do you usually get to them pretty fast?\n\n"
+        f"— {my_name}"
     )
 
 def _tmpl_assistant_handles(my_name: str) -> str:
     return (
-        f"Makes sense. We actually supplement teams by providing backup coverage when everyone is busy. "
-        f"It ensures leads get instant property context (beds/baths/HOA) the second they text in. "
-        f"Are you completely set on your current setup?\n\n— {my_name}"
-        f"{_tmpl_ps()}"
+        f"Gotcha — a lot of teams I talk to already have someone helping with inbound.\n\n"
+        f"Out of curiosity, do leads ever still sit for a bit during busy hours or is response time pretty locked in?\n\n"
+        f"— {my_name}"
     )
 
 def _tmpl_interested(my_name: str) -> str:
     return (
-        f"Happy to explain—we provide a safety net that sends instant property details to leads "
-        f"the second they text in, so you don't have to stop what you're doing. "
-        f"It keeps you looking professional while you're busy with other clients. "
-        f"Want me to send a 60-second interactive preview for one of your properties?\n\n— {my_name}"
-        f"{_tmpl_ps()}"
+        f"Mainly helps with speed-to-lead.\n\n"
+        f"If someone inquires while you're in a showing, driving, or offline, they instantly get property details and basic questions handled until you jump back in personally.\n\n"
+        f"Happy to show you a couple real examples if helpful.\n\n"
+        f"— {my_name}"
     )
 
 def _tmpl_asks_price(my_name: str) -> str:
     return (
-        f"We can set up a live preview for one property completely free so you can see the results first. "
-        f"We only talk pricing once you've seen how it handles the busy work for you. "
-        f"Want me to send over a 60-second interactive preview for one of your listings?\n\n— {my_name}"
-        f"{_tmpl_ps()}"
+        f"We usually show you the results first so you can see how it handles the busy work for you.\n\n"
+        f"Happy to show you a couple real examples if that helps.\n\n"
+        f"— {my_name}"
     )
 
 def _tmpl_asks_details(my_name: str) -> str:
     return (
-        f"It's zero manual work for you. We provide backup coverage that sends instant, "
-        f"detailed info to leads so they stay engaged while you're busy with other clients. "
-        f"Want me to send a 60-second interactive preview for one of your properties?\n\n— {my_name}"
-        f"{_tmpl_ps()}"
+        f"It's zero manual work for you. We help with speed-to-lead so inquiries stay engaged while you're busy with other clients.\n\n"
+        f"Happy to show you a couple real examples if helpful.\n\n"
+        f"— {my_name}"
     )
 
 def _tmpl_not_relevant(my_name: str, property_address: str) -> str:
     return (
-        f"Ah, that makes sense—{property_address} probably doesn't get the same 'is it still available' heat as a residential listing. "
-        f"Do you have any other residential properties where those quick inquiry texts become a distraction? "
-        f"I'd love to send you a preview of how we handle those.\n\n— {my_name}"
-        f"{_tmpl_ps()}"
+        f"Ah, that makes sense—{property_address} probably doesn't get the same 'is it still available' heat as a residential listing.\n\n"
+        f"Do you have any other residential properties where those quick inquiry texts become a distraction?\n\n"
+        f"— {my_name}"
     )
 
 def _tmpl_confused(my_name: str, property_address: str) -> str:
     return (
         f"Sorry for the lack of context! I saw your listing for {property_address} and was just curious "
-        f"how you handle those quick property inquiries when you're busy with other clients. "
-        f"We have a system that provides instant info to leads so you don't have to. "
-        f"Want me to send a quick preview of how it works?\n\n— {my_name}"
-        f"{_tmpl_ps()}"
+        f"how you handle those quick property inquiries when you're busy with other clients.\n\n"
+        f"Do you usually get to those right away or once you're free?\n\n"
+        f"— {my_name}"
     )
 
 def _tmpl_pass_unsub() -> str:
@@ -580,7 +601,7 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         return
 
     lead_r = supabase.table('leads') \
-                 .select('id,email,name,do_not_contact,open_house') \
+                 .select('id,email,name,do_not_contact,open_house,reply_count,product_introduced,last_intent') \
                  .eq('email', from_email).execute()
     if not lead_r.data:
         _mark_processed(orig_msg_id, account['email'], from_email, 'NOT_A_LEAD', False)
@@ -598,8 +619,15 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
     # ── Step 1: Groq analyze ──────────────────────────────────────────────────
     property_address = lead.get('open_house') or "your listing"
     my_name = account.get('display_name') or "the team"
+
+    conversation_state = {
+        "reply_count": lead.get("reply_count", 0),
+        "product_introduced": lead.get("product_introduced", False),
+        "last_intent": lead.get("last_intent")
+    }
+
     print(f"  [{from_email}] calling Groq analyze (IMAP) …")
-    groq_result = _groq_analyze_reply(body_text, property_address=property_address, my_name=my_name)
+    groq_result = _groq_analyze_reply(body_text, property_address=property_address, my_name=my_name, conversation_state=conversation_state)
     if groq_result:
         print(f"  [{from_email}] Groq → intent={groq_result['intent']} "
               f"reasoning={groq_result['reasoning'][:80]}")
@@ -710,30 +738,25 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         _create_human_review_ticket(from_email, subject, body_text, intent, reasoning)
         _log_audit('OPS_TICKET_CREATED', {'from': from_email, 'intent': intent})
 
-    # ── Step 4: Send reply via SMTP ────────────────────────────────
+    # ── Step 4: Enqueue reply ────────────────────────────────
     _store_responded_lead(lead['id'], from_email, intent, body_text)
+    _clear_pending_followups(lead['id'])
 
     auto_reply_sent = False
     if reply_html:
-        ok = _send_smtp_reply(account, from_email, subject, reply_html,
-                              orig_msg_id, references)
-        auto_reply_sent = ok
-        if ok:
-            print(f"  [SENT] SMTP auto-reply → {from_email} ({intent})")
-            _log_audit('AUTO_REPLY_SENT', {
-                'to':         from_email,
-                'intent':     intent,
-                'reasoning':  reasoning,
-                'auto_reply': reply_html[:300],
-                'account':    account['email'],
-            })
-        else:
-            print(f"  [FAILED] SMTP auto-reply → {from_email}")
-            _log_audit('AUTO_REPLY_FAILED', {
-                'to':      from_email,
-                'intent':  intent,
-                'account': account['email'],
-            })
+        _enqueue_auto_reply(
+            lead=lead,
+            account_email=account['email'],
+            subject=subject,
+            body=reply_html,
+            in_reply_to=orig_msg_id,
+            references=references
+        )
+        auto_reply_sent = True
+
+    # Determine if product was introduced in this reply
+    pitched = (intent in ['INTERESTED', 'ASKS_PRICE', 'ASKS_DETAILS']) or (conversation_state['product_introduced'])
+    _update_lead_state(lead['id'], intent, product_introduced=pitched)
 
     _mark_processed(
         orig_msg_id, account['email'], from_email,
@@ -907,6 +930,87 @@ def _store_responded_lead(lead_id: int, email: str, intent: str, raw_reply: str)
     except:
         pass
 
+def _get_random_delay() -> datetime:
+    """Calculate randomized delay based on work hours (America/Chicago)."""
+    tz = pytz.timezone('America/Chicago')
+    now_tz = datetime.now(tz)
+
+    # Work hours: 8 AM - 6 PM
+    is_work_hours = 8 <= now_tz.hour < 18
+
+    if is_work_hours:
+        rand = random.random()
+        if rand < 0.70:
+            minutes = random.uniform(2, 12)
+        elif rand < 0.85:
+            minutes = random.uniform(12, 18)
+        else:
+            minutes = random.uniform(25, 40)
+    else:
+        # After hours: 30 sec - 5 mins
+        minutes = random.uniform(0.5, 5)
+
+    return datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+def _enqueue_auto_reply(lead: dict, account_email: str, subject: str, body: str,
+                        thread_id: str = None, in_reply_to: str = None, references: str = None):
+    """Enqueue the auto-reply in the email_queue for later delivery."""
+    scheduled_for = _get_random_delay()
+
+    # Ensure subject starts with Re:
+    if not subject.lower().startswith("re:"):
+        subject = f"Re: {subject}"
+
+    try:
+        supabase.table("email_queue").insert({
+            "lead_id": lead['id'],
+            "lead_email": lead['email'],
+            "subject": subject,
+            "body": body,
+            "scheduled_for": scheduled_for.isoformat(),
+            "sequence": 999, # High sequence to avoid triggering further follow-ups
+            "sent_from": account_email,
+            "thread_id": thread_id,
+            "in_reply_to": in_reply_to,
+            "references": references
+        }).execute()
+        print(f"  [ENQUEUED] Auto-reply for {lead['email']} at {scheduled_for.isoformat()}")
+    except Exception as e:
+        print(f"[ENQUEUE ERROR] {e}")
+
+def _update_lead_state(lead_id: int, intent: str, product_introduced: bool = False):
+    """Update conversation state on the lead."""
+    try:
+        # Fetch current state
+        lead_r = supabase.table("leads").select("reply_count, product_introduced").eq("id", lead_id).single().execute()
+        if not lead_r.data:
+            return
+
+        current_count = lead_r.data.get("reply_count", 0) or 0
+        already_introduced = lead_r.data.get("product_introduced", False)
+
+        update_data = {
+            "reply_count": current_count + 1,
+            "last_intent": intent,
+            "last_auto_reply_at": datetime.now(timezone.utc).isoformat(),
+            "responded": True,
+            "responded_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if product_introduced or already_introduced:
+            update_data["product_introduced"] = True
+
+        supabase.table("leads").update(update_data).eq("id", lead_id).execute()
+    except Exception as e:
+        print(f"[UPDATE LEAD STATE ERROR] {e}")
+
+def _clear_pending_followups(lead_id: int):
+    """Remove any unsent follow-ups from the queue for this lead."""
+    try:
+        supabase.table("email_queue").delete().eq("lead_id", lead_id).is_("sent_at", "null").execute()
+    except Exception as e:
+        print(f"[CLEAR FOLLOWUPS ERROR] {e}")
+
 #── Core message processor ────────────────────────────────────────────────────
 def _process_one_message(account: dict, access_token: str, msg: dict):
     headers      = msg['payload']['headers']
@@ -924,7 +1028,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         return
 
     lead_r = supabase.table("leads") \
-                 .select("id,email,name,do_not_contact,open_house") \
+                 .select("id,email,name,do_not_contact,open_house,reply_count,product_introduced,last_intent") \
                  .eq("email", from_email).execute()
     if not lead_r.data:
         _mark_processed(gmail_msg_id, account['email'], from_email, 'NOT_A_LEAD', False)
@@ -942,8 +1046,15 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     # ── Step 1: Ask Groq to READ the message, classify it, and draft a reply ──
     property_address = lead.get('open_house') or "your listing"
     my_name = account.get('display_name') or "the team"
+
+    conversation_state = {
+        "reply_count": lead.get("reply_count", 0),
+        "product_introduced": lead.get("product_introduced", False),
+        "last_intent": lead.get("last_intent")
+    }
+
     print(f"  [{from_email}] calling Groq analyze …")
-    groq_result = _groq_analyze_reply(body_text, property_address=property_address, my_name=my_name)
+    groq_result = _groq_analyze_reply(body_text, property_address=property_address, my_name=my_name, conversation_state=conversation_state)
     if groq_result:
         print(f"  [{from_email}] Groq → intent={groq_result['intent']} reasoning={groq_result['reasoning'][:80]}")
     else:
@@ -1074,32 +1185,29 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _create_human_review_ticket(from_email, subject, body_text, intent, reasoning)
         _log_audit('OPS_TICKET_CREATED', {"from": from_email, "intent": intent})
 
-    # ── Step 4: Send reply ─────────────────────────────────────────────────────
+    # ── Step 4: Enqueue reply ─────────────────────────────────────────────────────
     _store_responded_lead(lead['id'], from_email, intent, body_text)
+    _clear_pending_followups(lead['id'])
 
     auto_reply_sent = False
     if reply_html:
-        ok = _send_gmail_reply(account, access_token, 
-                               from_email, subject, reply_html,
-                               thread_id, orig_msg_id)
-        auto_reply_sent = ok
+        _enqueue_auto_reply(
+            lead=lead,
+            account_email=account['email'],
+            subject=subject,
+            body=reply_html,
+            thread_id=thread_id,
+            in_reply_to=orig_msg_id,
+            references=orig_msg_id # Gmail handles this via thread_id/in_reply_to mostly
+        )
+        auto_reply_sent = True # Marked as "sent" in terms of processed_replies because it's enqueued
 
-        if ok:
-            print(f"  [SENT] Auto-reply → {from_email} ({intent})")
-            _log_audit('AUTO_REPLY_SENT', {
-                "to":         from_email,
-                "intent":     intent,
-                "reasoning":  reasoning,
-                "auto_reply": reply_html[:300],
-                "account":    account['email'],
-            })
-        else:
-            print(f"  [FAILED] Auto-reply → {from_email}")
-            _log_audit('AUTO_REPLY_FAILED', {
-                "to":      from_email,
-                "intent":  intent,
-                "account": account['email'],
-            })
+    # Determine if product was introduced in this reply
+    # If the intent is INTERESTED, ASKS_PRICE, ASKS_DETAILS, we definitely pitched.
+    # Or if Groq decided to pitch based on state.
+    pitched = (intent in ['INTERESTED', 'ASKS_PRICE', 'ASKS_DETAILS']) or (conversation_state['product_introduced'])
+
+    _update_lead_state(lead['id'], intent, product_introduced=pitched)
 
     _mark_processed(
         gmail_msg_id, account['email'], from_email,
