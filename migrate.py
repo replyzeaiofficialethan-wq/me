@@ -27,6 +27,10 @@ ADD COLUMN IF NOT EXISTS conversation_stage TEXT,
 ADD COLUMN IF NOT EXISTS product_introduced BOOLEAN DEFAULT FALSE,
 ADD COLUMN IF NOT EXISTS last_intent TEXT,
 ADD COLUMN IF NOT EXISTS last_auto_reply_at TIMESTAMPTZ;
+
+-- Drop foreign key constraint on daily_email_counts to allow Gmail accounts
+ALTER TABLE public.daily_email_counts
+DROP CONSTRAINT IF EXISTS daily_email_counts_email_account_fkey;
 """
 
 if __name__ == "__main__":
