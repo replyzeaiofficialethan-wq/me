@@ -55,6 +55,40 @@ def get_access_token(encrypted_refresh_token: str) -> str | None:
         print(f"[TOKEN EXCEPTION] {e}")
         return None
 
+#── Phrase Randomization Pools ───────────────────────────────────────────────
+OPENERS = [
+    "Makes sense.",
+    "Yeah fair enough.",
+    "Totally get that.",
+    "That tracks.",
+    "Honestly that's how most agents handle it.",
+    "Gotcha.",
+]
+
+SITUATIONS = [
+    "during showings",
+    "while driving",
+    "when things get hectic",
+    "during back-to-back appointments",
+    "when you're tied up with clients",
+]
+
+STYLE_MODES = [
+    "brief_casual",
+    "observational",
+    "slightly_curious",
+    "very_short",
+]
+
+def get_generation_params():
+    """Generates randomized parameters for conversational variability."""
+    return {
+        "opener": random.choice(OPENERS),
+        "situation": random.choice(SITUATIONS),
+        "style_mode": random.choice(STYLE_MODES),
+        "ask_question": random.random() < 0.35  # 30-40% probability
+    }
+
 #── Groq multi-key pool ───────────────────────────────────────────────────────
 def load_groq_keys() -> list[str]:
     keys = []
@@ -95,17 +129,42 @@ Your job is to:
 CONVERSATION STATE:
 {conversation_state}
 
+CURRENT GENERATION CONSTRAINTS:
+- Style Mode: {style_mode}
+- Preferred Opener: {opener}
+- Preferred Context/Situation: {situation}
+- Ask Follow-up Question: {ask_question}
+
 CRITICAL RULES:
 - NEVER MENTION "AI" OR "BOTS". Use "system", "service", "speed-to-lead", "handling inbound while busy", "keeping leads warm", or "covering gaps during showings".
-- DO NOT use "backup coverage", "safety net", "interactive preview", or "live preview".
-- TONE MIRRORING: If they are brief (e.g. "I do"), you must be very brief. If they mention a specific word like "targeting", acknowledge it.
-- FRAMEWORK:
-  Keep conversations natural and progressive.
+- MINDSET: Your goal is NOT to close the lead quickly. Keep the conversation feeling natural and ongoing. Curiosity and realism matter more than pitching.
+- Do NOT always ask a question.
+- If Ask Follow-up Question is True: You MUST include a short, natural follow-up question.
+- If Ask Follow-up Question is False: You MUST NOT ask any questions. Simply acknowledge, relate, make an observation, and then stop talking.
+- Many replies should simply make an observation and stop.
+- Sometimes the best reply is only 1 short sentence.
+- Avoid sounding like a sales discovery call. Humans do not ask questions in every message.
+- Reply like a normal person having a casual email conversation. Avoid sounding structured or scripted.
+- Slightly imperfect writing is okay. Replies should feel spontaneous.
+- Avoid repeating the same openings repeatedly. Rotate phrasing naturally.
+- Use the Preferred Opener: "{opener}" if it fits the flow.
+- Most replies should be under 2 sentences. Occasionally send a 1-sentence reply.
+- Avoid long explanations unless explicitly asked.
 
+TONE & STYLE:
+- Current style mode: {style_mode}
+- {style_mode_instruction}
+
+FORBIDDEN TERMS:
+- leverage, optimize, seamless, streamline, automate, cutting-edge, solution, platform, innovative, efficiency, workflow, maximize, enhance, AI-powered, intelligent assistant, game changer, frictionless, revolutionize, ecosystem, robust, scalable.
+- backup coverage, safety net, interactive preview, live preview, current setup, walking you through, happy to explain, just wanted to follow up, touch base, circle back.
+
+- TONE MIRRORING: If they are brief (e.g. "I do"), you must be very brief. If they mention a specific word like "targeting", acknowledge it.
+
+- CONVERSATIONAL FLOW:
   FIRST REPLY (if product_introduced is false):
-  - validate briefly,
-  - deepen awareness of the operational issue (e.g. back-to-back showings, driving),
-  - ask a low-friction, simple conversational follow-up question.
+  - Acknowledge their point naturally using the opener or context.
+  - Deepen awareness of the operational issue (e.g. {situation}).
   - DO NOT pitch the product yet.
   - DO NOT ask if they are set on their current setup.
 
@@ -113,17 +172,6 @@ CRITICAL RULES:
   - explain the service briefly (handling inbound property inquiries instantly),
   - tie it to speed-to-lead and missed opportunities,
   - then offer a preview/demo.
-
-- HUMANIZATION:
-  - Vary sentence length naturally.
-  - Sometimes be extremely brief.
-  - Avoid repetitive phrases.
-  - Avoid corporate/startup wording.
-  - Replies should feel like casual email conversation, not marketing copy.
-  - Avoid sounding like LinkedIn marketing copy or polished startup phrasing.
-  - Write like a normal person emailing another normal person.
-
-- FORBIDDEN WORDS: leverage, optimize, seamless, streamline, automate, cutting-edge, solution, platform, innovative, efficiency, workflow, maximize, enhance, AI-powered, intelligent assistant, game changer, frictionless, revolutionize, ecosystem, robust, scalable.
 
 - Use the sender's name {my_name} at the end of the reply.
 
@@ -145,15 +193,16 @@ UNKNOWN            : Cannot determine intent.
 REPLY LOGIC:
 - If AGENT_HANDLES:
   DO NOT immediately pitch the product.
-  DO NOT ask if they are set on their current setup.
-  Instead: briefly validate, mention a relatable operational situation (showings/driving), ask a simple conversational follow-up question.
-  Example: "Makes sense. Most agents I talk to reply themselves too — it just gets tough during back-to-back showings or while driving. Do you usually answer those leads immediately or once you're free?"
+  Acknowledge that they handle it. Relate to how that works {situation}.
+  If Ask Follow-up Question is True, ask a simple follow-up like "Do you usually answer those leads immediately or once you're free?"
+  Otherwise, just make the observation and stop.
 
 - If ASSISTANT_HANDLES:
-  Example: "Gotcha — a lot of teams I talk to already have someone helping with inbound. Out of curiosity, do leads ever still sit for a bit during busy hours or is response time pretty locked in?"
+  Acknowledge they have help. Mention how {situation} usually still leaves gaps.
+  If Ask Follow-up Question is True, ask if leads ever still sit for a bit during busy hours.
 
 - If INTERESTED:
-  Example: "Mainly helps with speed-to-lead. If someone inquires while you're in a showing, driving, or offline, they instantly get property details and basic questions handled until you jump back in personally. Happy to show you a couple real examples if helpful."
+  Briefly explain speed-to-lead. If someone inquires {situation}, they get an instant response until you can jump in.
 
 Respond ONLY with valid JSON:
 {{
@@ -163,7 +212,7 @@ Respond ONLY with valid JSON:
 }}
 """
 
-def _groq_analyze_reply(text: str, property_address: str = "your listing", my_name: str = "the team", conversation_state: dict | None = None) -> dict | None:
+def _groq_analyze_reply(text: str, property_address: str = "your listing", my_name: str = "the team", conversation_state: dict | None = None, gen_params: dict | None = None) -> dict | None:
     """
     Primary intelligence layer.
     Calls Groq to READ the reply, classify intent properly, and generate
@@ -175,11 +224,26 @@ def _groq_analyze_reply(text: str, property_address: str = "your listing", my_na
     if not GROQ_KEYS:
         return None
     
+    gp = gen_params or get_generation_params()
+
+    style_mode_instructions = {
+        "brief_casual": "Keep it very casual and brief. Like a quick text from a colleague.",
+        "observational": "Focus on making a relatable observation about the situation. Don't push.",
+        "slightly_curious": "Show a little bit of interest in how they handle things, but keep it light.",
+        "very_short": "Be extremely brief. One short sentence maximum."
+    }
+    style_instr = style_mode_instructions.get(gp['style_mode'], style_mode_instructions['brief_casual'])
+
     state_str = json.dumps(conversation_state or {}, indent=2)
     system_prompt = _GROQ_SYSTEM_PROMPT.format(
         property_address=property_address,
         my_name=my_name,
-        conversation_state=state_str
+        conversation_state=state_str,
+        style_mode=gp['style_mode'],
+        opener=gp['opener'],
+        situation=gp['situation'],
+        ask_question=gp['ask_question'],
+        style_mode_instruction=style_instr
     )
 
     for _ in range(len(GROQ_KEYS)):
@@ -371,70 +435,62 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
 def _tmpl_ps() -> str:
     return "\n\nP.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
 
-def _tmpl_asks_identity(my_name: str) -> str:
-    return (
-        f"Hey—I'm with Replyze. We help with speed-to-lead by handling inbound property inquiries "
-        f"instantly when you're busy in a showing or driving. It ensures no lead is missed while you're offline. "
-        f"Happy to show you a couple real examples if helpful.\n\n— {my_name}"
-    )
+def _tmpl_asks_identity(my_name: str, gp: dict) -> str:
+    body = f"{gp['opener']} We help with speed-to-lead by handling inbound property inquiries instantly when you're busy {gp['situation']}. "
+    if gp['ask_question']:
+        body += "Happy to show you a couple real examples if helpful?"
+    return f"{body}\n\n— {my_name}"
 
-def _tmpl_agent_handles(my_name: str) -> str:
-    return (
-        f"Makes sense. Most agents I talk to reply themselves too — it usually gets tricky during back-to-back showings or while driving.\n\n"
-        f"Do you usually answer those leads right away or once you're free?\n\n"
-        f"— {my_name}"
-    )
+def _tmpl_agent_handles(my_name: str, gp: dict) -> str:
+    if gp['style_mode'] == 'very_short':
+        return f"{gp['opener']}\n\n— {my_name}"
 
-def _tmpl_nobody_handles(my_name: str) -> str:
-    return (
-        f"That makes sense—and missed leads usually mean missed commissions.\n\n"
-        f"Do leads ever sit for a bit during busy hours or do you usually get to them pretty fast?\n\n"
-        f"— {my_name}"
-    )
+    body = f"{gp['opener']} Most agents I talk to reply themselves too — it just gets tough {gp['situation']}."
+    if gp['ask_question']:
+        body += "\n\nDo you usually answer those leads immediately or once you're free?"
+    return f"{body}\n\n— {my_name}"
 
-def _tmpl_assistant_handles(my_name: str) -> str:
-    return (
-        f"Gotcha — a lot of teams I talk to already have someone helping with inbound.\n\n"
-        f"Out of curiosity, do leads ever still sit for a bit during busy hours or is response time pretty locked in?\n\n"
-        f"— {my_name}"
-    )
+def _tmpl_nobody_handles(my_name: str, gp: dict) -> str:
+    body = f"{gp['opener']} Missed leads usually mean missed commissions, especially {gp['situation']}."
+    if gp['ask_question']:
+        body += "\n\nDo leads ever sit for a bit during busy hours or do you usually get to them pretty fast?"
+    return f"{body}\n\n— {my_name}"
 
-def _tmpl_interested(my_name: str) -> str:
-    return (
-        f"Mainly helps with speed-to-lead.\n\n"
-        f"If someone inquires while you're in a showing, driving, or offline, they instantly get property details and basic questions handled until you jump back in personally.\n\n"
-        f"Happy to show you a couple real examples if helpful.\n\n"
-        f"— {my_name}"
-    )
+def _tmpl_assistant_handles(my_name: str, gp: dict) -> str:
+    body = f"{gp['opener']} A lot of teams I talk to already have someone helping with inbound."
+    if gp['ask_question']:
+        body += f"\n\nOut of curiosity, do leads ever still sit for a bit {gp['situation']} or is response time pretty locked in?"
+    return f"{body}\n\n— {my_name}"
 
-def _tmpl_asks_price(my_name: str) -> str:
-    return (
-        f"We usually show you the results first so you can see how it handles the busy work for you.\n\n"
-        f"Happy to show you a couple real examples if that helps.\n\n"
-        f"— {my_name}"
-    )
+def _tmpl_interested(my_name: str, gp: dict) -> str:
+    body = f"Mainly helps with speed-to-lead. If someone inquires {gp['situation']}, they instantly get property details handled until you can jump back in."
+    if gp['ask_question']:
+        body += "\n\nHappy to show you a couple real examples if helpful?"
+    return f"{body}\n\n— {my_name}"
 
-def _tmpl_asks_details(my_name: str) -> str:
-    return (
-        f"It's zero manual work for you. We help with speed-to-lead so inquiries stay engaged while you're busy with other clients.\n\n"
-        f"Happy to show you a couple real examples if helpful.\n\n"
-        f"— {my_name}"
-    )
+def _tmpl_asks_price(my_name: str, gp: dict) -> str:
+    body = f"{gp['opener']} We usually show you the results first so you can see how it handles the busy work for you."
+    if gp['ask_question']:
+        body += "\n\nHappy to show you a couple real examples if that helps?"
+    return f"{body}\n\n— {my_name}"
 
-def _tmpl_not_relevant(my_name: str, property_address: str) -> str:
-    return (
-        f"Ah, that makes sense—{property_address} probably doesn't get the same 'is it still available' heat as a residential listing.\n\n"
-        f"Do you have any other residential properties where those quick inquiry texts become a distraction?\n\n"
-        f"— {my_name}"
-    )
+def _tmpl_asks_details(my_name: str, gp: dict) -> str:
+    body = f"It's zero manual work for you. We help with speed-to-lead so inquiries stay engaged {gp['situation']} while you're busy."
+    if gp['ask_question']:
+        body += "\n\nHappy to show you a couple real examples if helpful?"
+    return f"{body}\n\n— {my_name}"
 
-def _tmpl_confused(my_name: str, property_address: str) -> str:
-    return (
-        f"Sorry for the lack of context! I saw your listing for {property_address} and was just curious "
-        f"how you handle those quick property inquiries when you're busy with other clients.\n\n"
-        f"Do you usually get to those right away or once you're free?\n\n"
-        f"— {my_name}"
-    )
+def _tmpl_not_relevant(my_name: str, property_address: str, gp: dict) -> str:
+    body = f"{gp['opener']} {property_address} probably doesn't get the same 'is it still available' heat as a residential listing."
+    if gp['ask_question']:
+        body += "\n\nDo you have any other residential properties where those quick inquiry texts become a distraction?"
+    return f"{body}\n\n— {my_name}"
+
+def _tmpl_confused(my_name: str, property_address: str, gp: dict) -> str:
+    body = f"Sorry for the lack of context! I saw your listing for {property_address} and was just curious how you handle those quick property inquiries {gp['situation']}."
+    if gp['ask_question']:
+        body += "\n\nDo you usually get to those right away or once you're free?"
+    return f"{body}\n\n— {my_name}"
 
 def _tmpl_pass_unsub() -> str:
     return (
@@ -447,9 +503,9 @@ def _tmpl_negative_objection() -> str:
         "I apologize for the confusion. I'll correct my records right away and won't reach out again."
     )
 
-def _tmpl_unknown(my_name: str) -> str:
+def _tmpl_unknown(my_name: str, gp: dict) -> str:
     return (
-        f"Thanks — got your message. I'll get back to you with more details shortly.\n\n— {my_name}"
+        f"{gp['opener']} Thanks — got your message. I'll get back to you with more details shortly.\n\n— {my_name}"
     )
 
 #── Gmail helpers ─────────────────────────────────────────────────────────────
@@ -619,6 +675,7 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
     # ── Step 1: Groq analyze ──────────────────────────────────────────────────
     property_address = lead.get('open_house') or "your listing"
     my_name = account.get('display_name') or "the team"
+    gp = get_generation_params()
 
     conversation_state = {
         "reply_count": lead.get("reply_count", 0),
@@ -627,7 +684,7 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
     }
 
     print(f"  [{from_email}] calling Groq analyze (IMAP) …")
-    groq_result = _groq_analyze_reply(body_text, property_address=property_address, my_name=my_name, conversation_state=conversation_state)
+    groq_result = _groq_analyze_reply(body_text, property_address=property_address, my_name=my_name, conversation_state=conversation_state, gen_params=gp)
     if groq_result:
         print(f"  [{from_email}] Groq → intent={groq_result['intent']} "
               f"reasoning={groq_result['reasoning'][:80]}")
@@ -661,35 +718,35 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
     reply_html: str | None = None
 
     if intent == 'AGENT_HANDLES':
-        reply_html = groq_reply or _tmpl_agent_handles(my_name)
+        reply_html = groq_reply or _tmpl_agent_handles(my_name, gp)
         _log_audit('AGENT_HANDLES', {
             'from': from_email, 'account': account['email'],
         })
         _update_lead_status(from_email, 'agent_handles')
 
     elif intent == 'NOBODY_HANDLES':
-        reply_html = groq_reply or _tmpl_nobody_handles(my_name)
+        reply_html = groq_reply or _tmpl_nobody_handles(my_name, gp)
         _log_audit('NOBODY_HANDLES', {
             'from': from_email, 'account': account['email'],
         })
         _update_lead_status(from_email, 'nobody_handles')
 
     elif intent == 'ASSISTANT_HANDLES':
-        reply_html = groq_reply or _tmpl_assistant_handles(my_name)
+        reply_html = groq_reply or _tmpl_assistant_handles(my_name, gp)
         _log_audit('ASSISTANT_HANDLES', {
             'from': from_email, 'account': account['email'],
         })
         _update_lead_status(from_email, 'assistant_handles')
 
     elif intent == 'INTERESTED':
-        reply_html = groq_reply or _tmpl_interested(my_name)
+        reply_html = groq_reply or _tmpl_interested(my_name, gp)
         _log_audit('INTERESTED', {
             'from': from_email, 'account': account['email'],
         })
         _update_lead_status(from_email, 'interested')
 
     elif intent == 'ASKS_IDENTITY':
-        reply_html = groq_reply or _tmpl_asks_identity(my_name)
+        reply_html = groq_reply or _tmpl_asks_identity(my_name, gp)
         _log_audit('ASKS_IDENTITY', {
             'from': from_email, 'reasoning': reasoning, 'account': account['email'],
         })
@@ -701,10 +758,10 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         })
 
     elif intent == 'ASKS_PRICE':
-        reply_html = groq_reply or _tmpl_asks_price(my_name)
+        reply_html = groq_reply or _tmpl_asks_price(my_name, gp)
 
     elif intent == 'ASKS_DETAILS':
-        reply_html = groq_reply or _tmpl_asks_details(my_name)
+        reply_html = groq_reply or _tmpl_asks_details(my_name, gp)
 
     elif intent == 'PASS_UNSUB':
         reply_html = groq_reply or _tmpl_pass_unsub()
@@ -712,14 +769,14 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         _log_audit('UNSUBSCRIBED', {'email': from_email})
 
     elif intent == 'NOT_RELEVANT':
-        reply_html = groq_reply or _tmpl_not_relevant(my_name, property_address)
+        reply_html = groq_reply or _tmpl_not_relevant(my_name, property_address, gp)
         _log_audit('NOT_RELEVANT', {
             'from': from_email, 'account': account['email'],
         })
         _update_lead_status(from_email, 'not_relevant')
 
     elif intent == 'CONFUSED':
-        reply_html = groq_reply or _tmpl_confused(my_name, property_address)
+        reply_html = groq_reply or _tmpl_confused(my_name, property_address, gp)
         _log_audit('CONFUSED', {
             'from': from_email, 'account': account['email'],
         })
@@ -733,7 +790,7 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         })
 
     else:
-        reply_html = groq_reply or _tmpl_unknown(my_name)
+        reply_html = groq_reply or _tmpl_unknown(my_name, gp)
         create_ops_ticket(from_email, subject, body_text, intent)
         _create_human_review_ticket(from_email, subject, body_text, intent, reasoning)
         _log_audit('OPS_TICKET_CREATED', {'from': from_email, 'intent': intent})
@@ -1046,6 +1103,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     # ── Step 1: Ask Groq to READ the message, classify it, and draft a reply ──
     property_address = lead.get('open_house') or "your listing"
     my_name = account.get('display_name') or "the team"
+    gp = get_generation_params()
 
     conversation_state = {
         "reply_count": lead.get("reply_count", 0),
@@ -1054,7 +1112,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     }
 
     print(f"  [{from_email}] calling Groq analyze …")
-    groq_result = _groq_analyze_reply(body_text, property_address=property_address, my_name=my_name, conversation_state=conversation_state)
+    groq_result = _groq_analyze_reply(body_text, property_address=property_address, my_name=my_name, conversation_state=conversation_state, gen_params=gp)
     if groq_result:
         print(f"  [{from_email}] Groq → intent={groq_result['intent']} reasoning={groq_result['reasoning'][:80]}")
     else:
@@ -1092,7 +1150,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     reply_html: str | None = None
 
     if intent == 'AGENT_HANDLES':
-        reply_html = groq_reply or _tmpl_agent_handles(my_name)
+        reply_html = groq_reply or _tmpl_agent_handles(my_name, gp)
         _log_audit('AGENT_HANDLES', {
             "from":    from_email,
             "account": account['email'],
@@ -1100,7 +1158,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _update_lead_status(from_email, 'agent_handles')
 
     elif intent == 'NOBODY_HANDLES':
-        reply_html = groq_reply or _tmpl_nobody_handles(my_name)
+        reply_html = groq_reply or _tmpl_nobody_handles(my_name, gp)
         _log_audit('NOBODY_HANDLES', {
             "from":    from_email,
             "account": account['email'],
@@ -1108,7 +1166,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _update_lead_status(from_email, 'nobody_handles')
 
     elif intent == 'ASSISTANT_HANDLES':
-        reply_html = groq_reply or _tmpl_assistant_handles(my_name)
+        reply_html = groq_reply or _tmpl_assistant_handles(my_name, gp)
         _log_audit('ASSISTANT_HANDLES', {
             "from":    from_email,
             "account": account["email"],
@@ -1116,7 +1174,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _update_lead_status(from_email, 'assistant_handles')
 
     elif intent == 'INTERESTED':
-        reply_html = groq_reply or _tmpl_interested(my_name)
+        reply_html = groq_reply or _tmpl_interested(my_name, gp)
         _log_audit('INTERESTED', {
             "from":    from_email,
             "account": account["email"],
@@ -1125,7 +1183,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
 
     elif intent == 'ASKS_IDENTITY':
         # They want to know who sent this — confirm identity confidently, no apology
-        reply_html = groq_reply or _tmpl_asks_identity(my_name)
+        reply_html = groq_reply or _tmpl_asks_identity(my_name, gp)
         _log_audit('ASKS_IDENTITY', {
             "from":      from_email,
             "reasoning": reasoning,
@@ -1142,10 +1200,10 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         })
 
     elif intent == 'ASKS_PRICE':
-        reply_html = groq_reply or _tmpl_asks_price(my_name)
+        reply_html = groq_reply or _tmpl_asks_price(my_name, gp)
 
     elif intent == 'ASKS_DETAILS':
-        reply_html = groq_reply or _tmpl_asks_details(my_name)
+        reply_html = groq_reply or _tmpl_asks_details(my_name, gp)
 
     elif intent == 'PASS_UNSUB':
         reply_html = groq_reply or _tmpl_pass_unsub()
@@ -1153,7 +1211,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _log_audit('UNSUBSCRIBED', {"email": from_email})
 
     elif intent == 'NOT_RELEVANT':
-        reply_html = groq_reply or _tmpl_not_relevant(my_name, property_address)
+        reply_html = groq_reply or _tmpl_not_relevant(my_name, property_address, gp)
         _log_audit('NOT_RELEVANT', {
             "from":    from_email,
             "account": account['email'],
@@ -1161,7 +1219,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _update_lead_status(from_email, 'not_relevant')
 
     elif intent == 'CONFUSED':
-        reply_html = groq_reply or _tmpl_confused(my_name, property_address)
+        reply_html = groq_reply or _tmpl_confused(my_name, property_address, gp)
         _log_audit('CONFUSED', {
             "from":    from_email,
             "account": account['email'],
@@ -1180,7 +1238,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
 
     else:
         # UNKNOWN or QUESTION_OTHER — queue for human review
-        reply_html = groq_reply or _tmpl_unknown(my_name)
+        reply_html = groq_reply or _tmpl_unknown(my_name, gp)
         create_ops_ticket(from_email, subject, body_text, intent)
         _create_human_review_ticket(from_email, subject, body_text, intent, reasoning)
         _log_audit('OPS_TICKET_CREATED', {"from": from_email, "intent": intent})
