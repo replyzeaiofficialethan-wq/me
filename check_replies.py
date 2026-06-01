@@ -58,12 +58,19 @@ def get_access_token(encrypted_refresh_token: str) -> str | None:
 #── Phrase Randomization Pools ───────────────────────────────────────────────
 OPENERS = [
     "Makes sense.",
-    "Yeah fair enough.",
-    "Totally get that.",
-    "That tracks.",
-    "Honestly that's how most agents handle it.",
+    "Yeah, fair enough.",
     "Gotcha.",
+    "That tracks."
 ]
+
+BELIEF_QUESTIONS = [
+    "Out of curiosity, how much do you think response time actually matters when a new lead comes in? Some agents tell me it's huge, others say it barely changes anything.",
+    "Random question—do you feel like the first agent to reply usually has a massive advantage, or is it mostly about the relationship once you're actually talking to them?"
+]
+
+BELIEF_QUESTION_RATE = 0.5
+
+BELIEF_SIGNALS = ['BELIEF_HIGH', 'BELIEF_MEDIUM', 'BELIEF_LOW', 'BELIEF_UNKNOWN']
 
 SITUATIONS = [
     "during showings",
@@ -123,7 +130,7 @@ We provide a service called Replyze.
 
 Your job is to:
 1. READ and UNDERSTAND exactly what the agent is saying.
-2. Classify their REAL intent.
+2. Classify their REAL intent and identify belief signals regarding response time.
 3. Write a short, human, conversational reply that MIRRORS their tone, energy, and brevity.
 
 CONVERSATION STATE:
@@ -134,6 +141,7 @@ CURRENT GENERATION CONSTRAINTS:
 - Preferred Opener: {opener}
 - Preferred Context/Situation: {situation}
 - Ask Follow-up Question: {ask_question}
+{variant_instructions}
 
 CRITICAL RULES:
 - NEVER MENTION "AI" OR "BOTS". Use "system", "service", "speed-to-lead", "handling inbound while busy", "keeping leads warm", or "covering gaps during showings".
@@ -159,6 +167,9 @@ FORBIDDEN TERMS:
 - leverage, optimize, seamless, streamline, automate, cutting-edge, solution, platform, innovative, efficiency, workflow, maximize, enhance, AI-powered, intelligent assistant, game changer, frictionless, revolutionize, ecosystem, robust, scalable.
 - backup coverage, safety net, interactive preview, live preview, current setup, walking you through, happy to explain, just wanted to follow up, touch base, circle back.
 
+PREFERRED LANGUAGE:
+- response time, replying first, getting back to leads, responding quickly, handling inquiries, keeping conversations moving.
+
 - TONE MIRRORING: If they are brief (e.g. "I do"), you must be very brief. If they mention a specific word like "targeting", acknowledge it.
 
 - CONVERSATIONAL FLOW:
@@ -170,7 +181,7 @@ FORBIDDEN TERMS:
 
   ONLY AFTER engagement (if product_introduced is true):
   - explain the service briefly (handling inbound property inquiries instantly),
-  - tie it to speed-to-lead and missed opportunities,
+  - tie it to response time and missed opportunities,
   - then offer a preview/demo.
 
 - Use the sender's name {my_name} at the end of the reply.
@@ -190,6 +201,12 @@ PASS_UNSUB         : They are explicitly declining or asking to be removed.
 NEGATIVE_OBJECTION : Upset, frustrated, or angrily correcting us.
 UNKNOWN            : Cannot determine intent.
 
+BELIEF SIGNAL LABELS:
+BELIEF_HIGH    : Clearly believes response time is critical (e.g., "Response time is huge", "First reply usually wins").
+BELIEF_MEDIUM  : Thinks it matters but isn't the only factor (e.g., "It helps but isn't everything").
+BELIEF_LOW     : Doesn't think it matters much (e.g., "Relationship matters more", "Doesn't change anything").
+BELIEF_UNKNOWN : Unclear or off-topic regarding response time beliefs.
+
 REPLY LOGIC:
 - If AGENT_HANDLES:
   DO NOT immediately pitch the product.
@@ -202,22 +219,23 @@ REPLY LOGIC:
   If Ask Follow-up Question is True, ask if leads ever still sit for a bit during busy hours.
 
 - If INTERESTED:
-  Briefly explain speed-to-lead. If someone inquires {situation}, they get an instant response until you can jump in.
+  Briefly explain how we help with response time. If someone inquires {situation}, they get an instant response until you can jump in.
 
 Respond ONLY with valid JSON:
 {{
   "intent": "INTENT_LABEL",
+  "belief_signal": "BELIEF_SIGNAL_LABEL",
   "reasoning": "1–2 sentence explanation",
   "reply_html": "Your reply\\n\\n— {my_name}"
 }}
 """
 
-def _groq_analyze_reply(text: str, property_address: str = "your listing", my_name: str = "the team", conversation_state: dict | None = None, gen_params: dict | None = None) -> dict | None:
+def _groq_analyze_reply(text: str, property_address: str = "your listing", my_name: str = "the team", conversation_state: dict | None = None, gen_params: dict | None = None, variant_tag: str | None = None, chosen_question: str | None = None) -> dict | None:
     """
     Primary intelligence layer.
     Calls Groq to READ the reply, classify intent properly, and generate
     a contextually appropriate response. Returns:
-    { intent, reasoning, reply_html }
+    { intent, belief_signal, reasoning, reply_html }
     Returns None if all keys fail or the model returns unusable output.
     """
     global _groq_cursor
@@ -234,6 +252,27 @@ def _groq_analyze_reply(text: str, property_address: str = "your listing", my_na
     }
     style_instr = style_mode_instructions.get(gp['style_mode'], style_mode_instructions['brief_casual'])
 
+    variant_instructions = ""
+    if variant_tag == "group_a_observation":
+        variant_instructions = f"""
+VARIANT A INSTRUCTIONS:
+- Start exactly with: "{gp['opener']}"
+- Make one short observation about how common or respectable their stance is.
+- Do NOT ask a question.
+- Keep the response under 2 sentences.
+- No AI/software jargon.
+"""
+    elif variant_tag == "group_b_belief_question" and chosen_question:
+        variant_instructions = f"""
+VARIANT B INSTRUCTIONS:
+- Start exactly with: "{gp['opener']}"
+- Append this question exactly as written verbatim: "{chosen_question}"
+- Do NOT change any words in the question.
+- Do NOT add another question or extra sentences.
+- Keep the tone casual, like an iPhone text.
+- Under 3 sentences total.
+"""
+
     state_str = json.dumps(conversation_state or {}, indent=2)
     system_prompt = _GROQ_SYSTEM_PROMPT.format(
         property_address=property_address,
@@ -243,7 +282,8 @@ def _groq_analyze_reply(text: str, property_address: str = "your listing", my_na
         opener=gp['opener'],
         situation=gp['situation'],
         ask_question=gp['ask_question'],
-        style_mode_instruction=style_instr
+        style_mode_instruction=style_instr,
+        variant_instructions=variant_instructions
     )
 
     for _ in range(len(GROQ_KEYS)):
@@ -275,11 +315,13 @@ def _groq_analyze_reply(text: str, property_address: str = "your listing", my_na
                     parsed  = json.loads(cleaned)
 
                 intent = parsed.get("intent", "").strip().upper()
+                belief_signal = parsed.get("belief_signal", "BELIEF_UNKNOWN").strip().upper()
                 if intent in _GROQ_VALID_INTENTS:
                     return {
-                        "intent":     intent,
-                        "reasoning":  parsed.get("reasoning", "")[:500],
-                        "reply_html": parsed.get("reply_html", "")[:1000],
+                        "intent":        intent,
+                        "belief_signal": belief_signal if belief_signal in BELIEF_SIGNALS else "BELIEF_UNKNOWN",
+                        "reasoning":     parsed.get("reasoning", "")[:500],
+                        "reply_html":    parsed.get("reply_html", "")[:1000],
                     }
                 print(f"[GROQ ANALYZE] unexpected intent: {intent!r}")
 
@@ -441,7 +483,13 @@ def _tmpl_asks_identity(my_name: str, gp: dict) -> str:
         body += "Happy to show you a couple real examples if helpful?"
     return f"{body}\n\n— {my_name}"
 
-def _tmpl_agent_handles(my_name: str, gp: dict) -> str:
+def _tmpl_agent_handles(my_name: str, gp: dict, variant_tag: str = None, chosen_question: str = None) -> str:
+    if variant_tag == "group_a_observation":
+        return f"{gp['opener']} That's pretty common from what I've seen.\n\n— {my_name}"
+    elif variant_tag == "group_b_belief_question" and chosen_question:
+        return f"{gp['opener']}\n\n{chosen_question}\n\n— {my_name}"
+
+    # Default legacy fallback if no variant is specified
     if gp['style_mode'] == 'very_short':
         return f"{gp['opener']}\n\n— {my_name}"
 
@@ -657,7 +705,7 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         return
 
     lead_r = supabase.table('leads') \
-                 .select('id,email,name,do_not_contact,open_house,reply_count,product_introduced,last_intent') \
+                 .select('id,email,name,do_not_contact,open_house,reply_count,product_introduced,last_intent,belief_variant') \
                  .eq('email', from_email).execute()
     if not lead_r.data:
         _mark_processed(orig_msg_id, account['email'], from_email, 'NOT_A_LEAD', False)
@@ -672,35 +720,21 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
     if not body_text.strip():
         return
 
-    # ── Step 1: Groq analyze ──────────────────────────────────────────────────
     property_address = lead.get('open_house') or "your listing"
     my_name = account.get('display_name') or "the team"
-    gp = get_generation_params()
 
-    conversation_state = {
-        "reply_count": lead.get("reply_count", 0),
-        "product_introduced": lead.get("product_introduced", False),
-        "last_intent": lead.get("last_intent")
-    }
-
-    print(f"  [{from_email}] calling Groq analyze (IMAP) …")
-    groq_result = _groq_analyze_reply(body_text, property_address=property_address, my_name=my_name, conversation_state=conversation_state, gen_params=gp)
-    if groq_result:
-        print(f"  [{from_email}] Groq → intent={groq_result['intent']} "
-              f"reasoning={groq_result['reasoning'][:80]}")
-    else:
-        print(f"  [{from_email}] Groq unavailable — falling back to regex classifier")
-
-    # ── Step 2: Final intent ──────────────────────────────────────────────────
-    intent     = classify_intent(body_text, groq_result)
-    reasoning  = groq_result.get('reasoning', '') if groq_result else ''
-    confidence = 0.9 if groq_result else 0.5
-    print(f"  [{from_email}] intent={intent}")
-
-    _log_agent_decision(
-        from_email=from_email, intent=intent, confidence=confidence,
-        reasoning=reasoning, metadata=groq_result or {},
+    analysis = _analyze_and_handle_reply(
+        from_email=from_email, body_text=body_text, lead=lead,
+        my_name=my_name, property_address=property_address,
+        msg_id=orig_msg_id, channel="smtp_imap"
     )
+
+    intent          = analysis['intent']
+    reasoning       = analysis['reasoning']
+    variant_tag     = analysis['variant_tag']
+    chosen_question = analysis['chosen_question']
+    groq_result     = analysis['groq_result']
+    gp              = analysis['gp']
 
     _log_audit('REPLY_RECEIVED', {
         'from':        from_email,
@@ -713,12 +747,12 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         'channel':     'smtp_imap',
     })
 
-    # ── Step 3: Choose reply (mirrors Gmail path exactly) ─────────────────────
+    # ── Step 6: Choose reply (mirrors Gmail path exactly) ─────────────────────
     groq_reply          = (groq_result or {}).get('reply_html', '').strip()
     reply_html: str | None = None
 
     if intent == 'AGENT_HANDLES':
-        reply_html = groq_reply or _tmpl_agent_handles(my_name, gp)
+        reply_html = groq_reply or _tmpl_agent_handles(my_name, gp, variant_tag=variant_tag, chosen_question=chosen_question)
         _log_audit('AGENT_HANDLES', {
             'from': from_email, 'account': account['email'],
         })
@@ -795,7 +829,7 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         _create_human_review_ticket(from_email, subject, body_text, intent, reasoning)
         _log_audit('OPS_TICKET_CREATED', {'from': from_email, 'intent': intent})
 
-    # ── Step 4: Enqueue reply ────────────────────────────────
+    # ── Step 7: Enqueue reply ────────────────────────────────
     _store_responded_lead(lead['id'], from_email, intent, body_text)
     _clear_pending_followups(lead['id'])
 
@@ -813,7 +847,7 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
 
     # Determine if product was introduced in this reply
     pitched = (intent in ['INTERESTED', 'ASKS_PRICE', 'ASKS_DETAILS']) or (conversation_state['product_introduced'])
-    _update_lead_state(lead['id'], intent, product_introduced=pitched)
+    _update_lead_state(lead['id'], intent, product_introduced=pitched, belief_variant=variant_tag)
 
     _mark_processed(
         orig_msg_id, account['email'], from_email,
@@ -1035,16 +1069,17 @@ def _enqueue_auto_reply(lead: dict, account_email: str, subject: str, body: str,
     except Exception as e:
         print(f"[ENQUEUE ERROR] {e}")
 
-def _update_lead_state(lead_id: int, intent: str, product_introduced: bool = False):
+def _update_lead_state(lead_id: int, intent: str, product_introduced: bool = False, belief_variant: str = None):
     """Update conversation state on the lead."""
     try:
         # Fetch current state
-        lead_r = supabase.table("leads").select("reply_count, product_introduced").eq("id", lead_id).single().execute()
+        lead_r = supabase.table("leads").select("reply_count, product_introduced, belief_variant").eq("id", lead_id).single().execute()
         if not lead_r.data:
             return
 
         current_count = lead_r.data.get("reply_count", 0) or 0
         already_introduced = lead_r.data.get("product_introduced", False)
+        existing_variant = lead_r.data.get("belief_variant")
 
         update_data = {
             "reply_count": current_count + 1,
@@ -1057,6 +1092,10 @@ def _update_lead_state(lead_id: int, intent: str, product_introduced: bool = Fal
         if product_introduced or already_introduced:
             update_data["product_introduced"] = True
 
+        if belief_variant and not existing_variant:
+            update_data["belief_variant"] = belief_variant
+            update_data["belief_assigned_at"] = datetime.now(timezone.utc).isoformat()
+
         supabase.table("leads").update(update_data).eq("id", lead_id).execute()
     except Exception as e:
         print(f"[UPDATE LEAD STATE ERROR] {e}")
@@ -1067,6 +1106,82 @@ def _clear_pending_followups(lead_id: int):
         supabase.table("email_queue").delete().eq("lead_id", lead_id).is_("sent_at", "null").execute()
     except Exception as e:
         print(f"[CLEAR FOLLOWUPS ERROR] {e}")
+
+def _analyze_and_handle_reply(from_email: str, body_text: str, lead: dict, my_name: str, property_address: str, msg_id: str, thread_id: str = None, channel: str = "gmail"):
+    """
+    Shared logic for analyzing a reply, assigning A/B test variants,
+    and generating the response. Used by both Gmail and IMAP paths.
+    """
+    gp = get_generation_params()
+
+    conversation_state = {
+        "reply_count": lead.get("reply_count", 0),
+        "product_introduced": lead.get("product_introduced", False),
+        "last_intent": lead.get("last_intent")
+    }
+
+    # ── Step 1: Groq analyze (Phase 1: Intent classification) ─────────────────
+    print(f"  [{from_email}] calling Groq analyze ({channel}) …")
+    groq_result = _groq_analyze_reply(
+        body_text, property_address=property_address, my_name=my_name,
+        conversation_state=conversation_state, gen_params=gp
+    )
+
+    # ── Step 2: Final intent ──────────────────────────────────────────────────
+    intent        = classify_intent(body_text, groq_result)
+    belief_signal = (groq_result or {}).get("belief_signal", "BELIEF_UNKNOWN")
+    reasoning     = groq_result.get('reasoning', '') if groq_result else ''
+    confidence    = 0.9 if groq_result else 0.5
+    print(f"  [{from_email}] intent={intent} belief_signal={belief_signal}")
+
+    # ── Step 3: Variant Assignment ───────────────────────────────────────────
+    variant_tag = lead.get("belief_variant")
+    chosen_question = None
+    if intent == "AGENT_HANDLES":
+        if not variant_tag:
+            variant_tag = "group_b_belief_question" if random.random() < BELIEF_QUESTION_RATE else "group_a_observation"
+            print(f"  [{from_email}] Assigned new variant: {variant_tag}")
+        else:
+            print(f"  [{from_email}] Using existing variant: {variant_tag}")
+
+        if variant_tag == "group_b_belief_question":
+            chosen_question = random.choice(BELIEF_QUESTIONS)
+
+    # ── Step 4: Re-run Groq with variant instructions (if AGENT_HANDLES) ──────
+    if intent == "AGENT_HANDLES" and variant_tag:
+        print(f"  [{from_email}] Re-calling Groq with variant instructions …")
+        groq_result = _groq_analyze_reply(
+            body_text, property_address=property_address, my_name=my_name,
+            conversation_state=conversation_state, gen_params=gp,
+            variant_tag=variant_tag, chosen_question=chosen_question
+        )
+
+    # ── Step 5: Decision Logging ──────────────────────────────────────────────
+    metadata = groq_result or {}
+    metadata.update({
+        "variant_tag":     variant_tag,
+        "belief_signal":   belief_signal,
+        "intent":          intent,
+        "lead_id":         lead['id'],
+        "thread_id":       thread_id,
+        "msg_id":          msg_id,
+        "channel":         channel
+    })
+
+    _log_agent_decision(
+        from_email=from_email, intent=intent, confidence=confidence,
+        reasoning=reasoning, metadata=metadata,
+    )
+
+    return {
+        "intent": intent,
+        "belief_signal": belief_signal,
+        "reasoning": reasoning,
+        "variant_tag": variant_tag,
+        "chosen_question": chosen_question,
+        "groq_result": groq_result,
+        "gp": gp
+    }
 
 #── Core message processor ────────────────────────────────────────────────────
 def _process_one_message(account: dict, access_token: str, msg: dict):
@@ -1085,7 +1200,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         return
 
     lead_r = supabase.table("leads") \
-                 .select("id,email,name,do_not_contact,open_house,reply_count,product_introduced,last_intent") \
+                 .select("id,email,name,do_not_contact,open_house,reply_count,product_introduced,last_intent,belief_variant") \
                  .eq("email", from_email).execute()
     if not lead_r.data:
         _mark_processed(gmail_msg_id, account['email'], from_email, 'NOT_A_LEAD', False)
@@ -1100,39 +1215,21 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     if not body_text.strip():
         return
 
-    # ── Step 1: Ask Groq to READ the message, classify it, and draft a reply ──
     property_address = lead.get('open_house') or "your listing"
     my_name = account.get('display_name') or "the team"
-    gp = get_generation_params()
 
-    conversation_state = {
-        "reply_count": lead.get("reply_count", 0),
-        "product_introduced": lead.get("product_introduced", False),
-        "last_intent": lead.get("last_intent")
-    }
-
-    print(f"  [{from_email}] calling Groq analyze …")
-    groq_result = _groq_analyze_reply(body_text, property_address=property_address, my_name=my_name, conversation_state=conversation_state, gen_params=gp)
-    if groq_result:
-        print(f"  [{from_email}] Groq → intent={groq_result['intent']} reasoning={groq_result['reasoning'][:80]}")
-    else:
-        print(f"  [{from_email}] Groq unavailable — falling back to regex classifier")
-
-    # ── Step 2: Final intent (Groq-first, regex fallback) ─────────────────────
-    intent = classify_intent(body_text, groq_result)
-    print(f"  [{from_email}] intent={intent}")
-
-    reasoning  = groq_result.get("reasoning", "") if groq_result else ""
-    confidence = 0.9 if groq_result else 0.5
-
-    # ── Structured agent decision log ─────────────────────────────────────────
-    _log_agent_decision(
-        from_email=from_email,
-        intent=intent,
-        confidence=confidence,
-        reasoning=reasoning,
-        metadata=groq_result or {},
+    analysis = _analyze_and_handle_reply(
+        from_email=from_email, body_text=body_text, lead=lead,
+        my_name=my_name, property_address=property_address,
+        msg_id=gmail_msg_id, thread_id=thread_id, channel="gmail"
     )
+
+    intent          = analysis['intent']
+    reasoning       = analysis['reasoning']
+    variant_tag     = analysis['variant_tag']
+    chosen_question = analysis['chosen_question']
+    groq_result     = analysis['groq_result']
+    gp              = analysis['gp']
 
     _log_audit('REPLY_RECEIVED', {
         "from":         from_email,
@@ -1144,13 +1241,13 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         "account":      account['email'],
     })
 
-    # ── Step 3: Choose reply ───────────────────────────────────────────────────
+    # ── Step 6: Choose reply ───────────────────────────────────────────────────
     # Prefer Groq's generated reply when available; fall back to static templates.
     groq_reply   = (groq_result or {}).get("reply_html", "").strip()
     reply_html: str | None = None
 
     if intent == 'AGENT_HANDLES':
-        reply_html = groq_reply or _tmpl_agent_handles(my_name, gp)
+        reply_html = groq_reply or _tmpl_agent_handles(my_name, gp, variant_tag=variant_tag, chosen_question=chosen_question)
         _log_audit('AGENT_HANDLES', {
             "from":    from_email,
             "account": account['email'],
@@ -1243,7 +1340,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         _create_human_review_ticket(from_email, subject, body_text, intent, reasoning)
         _log_audit('OPS_TICKET_CREATED', {"from": from_email, "intent": intent})
 
-    # ── Step 4: Enqueue reply ─────────────────────────────────────────────────────
+    # ── Step 7: Enqueue reply ─────────────────────────────────────────────────────
     _store_responded_lead(lead['id'], from_email, intent, body_text)
     _clear_pending_followups(lead['id'])
 
@@ -1261,11 +1358,9 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         auto_reply_sent = True # Marked as "sent" in terms of processed_replies because it's enqueued
 
     # Determine if product was introduced in this reply
-    # If the intent is INTERESTED, ASKS_PRICE, ASKS_DETAILS, we definitely pitched.
-    # Or if Groq decided to pitch based on state.
     pitched = (intent in ['INTERESTED', 'ASKS_PRICE', 'ASKS_DETAILS']) or (conversation_state['product_introduced'])
 
-    _update_lead_state(lead['id'], intent, product_introduced=pitched)
+    _update_lead_state(lead['id'], intent, product_introduced=pitched, belief_variant=variant_tag)
 
     _mark_processed(
         gmail_msg_id, account['email'], from_email,
