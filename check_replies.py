@@ -60,12 +60,14 @@ OPENERS = [
     "Makes sense.",
     "Yeah, fair enough.",
     "Gotcha.",
-    "That tracks."
+    "That tracks.",
+    "Right.",
+    "Exactly."
 ]
 
 BELIEF_QUESTIONS = [
-    "Out of curiosity, how much do you think response time actually matters when a new lead comes in? Some agents tell me it's huge, others say it barely changes anything.",
-    "Random question—do you feel like the first agent to reply usually has a massive advantage, or is it mostly about the relationship once you're actually talking to them?"
+    "Out of curiosity, how much do you think response time matters when someone has a burst pipe or AC is broken? Some contractors tell me it's huge — others say customers just call the next guy.",
+    "Random question — do you feel like the first contractor to respond usually gets the job, or do people still shop around after?"
 ]
 
 BELIEF_QUESTION_RATE = 0.5
@@ -73,11 +75,11 @@ BELIEF_QUESTION_RATE = 0.5
 BELIEF_SIGNALS = ['BELIEF_HIGH', 'BELIEF_MEDIUM', 'BELIEF_LOW', 'BELIEF_UNKNOWN']
 
 SITUATIONS = [
-    "during showings",
-    "while driving",
-    "when things get hectic",
-    "during back-to-back appointments",
-    "when you're tied up with clients",
+    "while you're on a job",
+    "during a repair",
+    "while driving between calls",
+    "when you're tied up with a client",
+    "after hours",
 ]
 
 STYLE_MODES = [
@@ -114,23 +116,23 @@ def load_groq_keys() -> list[str]:
 GROQ_KEYS:    list[str] = load_groq_keys()
 _groq_cursor: int       = 0
 
-#── UPDATED: Property-focused intents ─────────────────────────────────────────
+#── Emergency Home Services Intent Classification ─────────────────────────────
 _GROQ_VALID_INTENTS = {
     'AGENT_HANDLES', 'NOBODY_HANDLES', 'ASSISTANT_HANDLES', 'INTERESTED',
     'ASKS_PRICE', 'ASKS_DETAILS', 'ASKS_IDENTITY', 'ACKNOWLEDGMENT_ONLY',
     'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'NOT_RELEVANT', 'CONFUSED', 'UNKNOWN'
 }
 
-#── UPDATED: system prompt rewritten for Instant Auto-Reply service ────────────
+#── System prompt for Emergency Home Services ICP ────────────────────────────
 _GROQ_SYSTEM_PROMPT = """
 You are an intelligent reply analyzer for Replyze.
-A real estate agent has replied to a cold outreach email asking: "When a lead texts about {property_address} during a showing, who replies?"
+A home services business owner has replied to a cold outreach email asking: "When a high-urgency lead texts about an emergency service call (like a burst pipe or broken AC), who actually handles that reply?"
 
-We provide a service called Replyze.
+We provide a service called Replyze — a speed-to-lead solution for emergency home service companies.
 
 Your job is to:
-1. READ and UNDERSTAND exactly what the agent is saying.
-2. Classify their REAL intent and identify belief signals regarding response time.
+1. READ and UNDERSTAND exactly what the business owner is saying.
+2. Classify their REAL intent and identify belief signals about response time and missed revenue.
 3. Write a short, human, conversational reply that MIRRORS their tone, energy, and brevity.
 
 CONVERSATION STATE:
@@ -144,8 +146,8 @@ CURRENT GENERATION CONSTRAINTS:
 {variant_instructions}
 
 CRITICAL RULES:
-- NEVER MENTION "AI" OR "BOTS". Use "system", "service", "speed-to-lead", "handling inbound while busy", "keeping leads warm", or "covering gaps during showings".
-- MINDSET: Your goal is NOT to close the lead quickly. Keep the conversation feeling natural and ongoing. Curiosity and realism matter more than pitching.
+- NEVER MENTION "AI" OR "BOTS". Use "system", "service", "speed-to-lead", "handling inbound while busy", "keeping leads warm", or "covering gaps during service calls".
+- MINDSET: Your goal is NOT to close the lead quickly. Keep the conversation feeling natural and ongoing. Focus on the revenue impact of missed emergency calls. Curiosity and realism matter more than pitching.
 - Do NOT always ask a question.
 - If Ask Follow-up Question is True: You MUST include a short, natural follow-up question.
 - If Ask Follow-up Question is False: You MUST NOT ask any questions. Simply acknowledge, relate, make an observation, and then stop talking.
@@ -158,6 +160,7 @@ CRITICAL RULES:
 - Use the Preferred Opener: "{opener}" if it fits the flow.
 - Most replies should be under 2 sentences. Occasionally send a 1-sentence reply.
 - Avoid long explanations unless explicitly asked.
+- Always keep the business owner's perspective in mind — this is about revenue, not leads in the abstract.
 
 TONE & STYLE:
 - Current style mode: {style_mode}
@@ -168,33 +171,33 @@ FORBIDDEN TERMS:
 - backup coverage, safety net, interactive preview, live preview, current setup, walking you through, happy to explain, just wanted to follow up, touch base, circle back.
 
 PREFERRED LANGUAGE:
-- response time, replying first, getting back to leads, responding quickly, handling inquiries, keeping conversations moving.
+- response time, answering first, getting back to customers, responding quickly, handling urgent requests, keeping the pipeline full, missed calls, lost revenue, emergency jobs.
 
-- TONE MIRRORING: If they are brief (e.g. "I do"), you must be very brief. If they mention a specific word like "targeting", acknowledge it.
+- TONE MIRRORING: If they are brief (e.g. "I do"), you must be very brief. If they mention a specific word like "jobs" or "calls", acknowledge it.
 
 - CONVERSATIONAL FLOW:
   FIRST REPLY (if product_introduced is false):
   - Acknowledge their point naturally using the opener or context.
-  - Deepen awareness of the operational issue (e.g. {situation}).
+  - Deepen awareness of the operational issue (e.g. {situation}) and revenue impact.
   - DO NOT pitch the product yet.
   - DO NOT ask if they are set on their current setup.
 
   ONLY AFTER engagement (if product_introduced is true):
-  - explain the service briefly (handling inbound property inquiries instantly),
-  - tie it to response time and missed opportunities,
+  - explain the service briefly (handling inbound emergency calls instantly),
+  - tie it to response time and lost revenue opportunities,
   - then offer a preview/demo.
 
 - Use the sender's name {my_name} at the end of the reply.
 
 INTENT LABELS:
-AGENT_HANDLES      : They say they handle replies themselves (e.g., "Me", "I do", "I handle it").
-NOBODY_HANDLES     : They say nobody handles it, they miss leads, or it's a problem (e.g., "Nobody", "I usually miss them").
-ASSISTANT_HANDLES  : They have an assistant, team, or another service handling it.
+AGENT_HANDLES      : They say they handle calls themselves (e.g., "Me", "I do", "I answer my phones").
+NOBODY_HANDLES     : They say nobody handles it, they miss calls, or it's a problem (e.g., "Nobody", "I usually miss them", "Goes to voicemail").
+ASSISTANT_HANDLES  : They have an office manager, dispatcher, or answering service handling it.
 INTERESTED         : They are interested or want to know more.
 ASKS_PRICE         : They are asking about pricing / cost.
 ASKS_DETAILS       : They want to know how the system works.
 ASKS_IDENTITY      : They are asking who you are or what company this is.
-NOT_RELEVANT       : They say the property is raw land, sold, or not their listing.
+NOT_RELEVANT       : They are not in emergency home services — cleaning, painting, landscaping, insurance, etc.
 CONFUSED           : They don't understand the question or the purpose of the email.
 ACKNOWLEDGMENT_ONLY: A brief reply with no clear action — "got it", "ok".
 PASS_UNSUB         : They are explicitly declining or asking to be removed.
@@ -202,24 +205,23 @@ NEGATIVE_OBJECTION : Upset, frustrated, or angrily correcting us.
 UNKNOWN            : Cannot determine intent.
 
 BELIEF SIGNAL LABELS:
-BELIEF_HIGH    : Clearly believes response time is critical (e.g., "Response time is huge", "First reply usually wins").
-BELIEF_MEDIUM  : Thinks it matters but isn't the only factor (e.g., "It helps but isn't everything").
-BELIEF_LOW     : Doesn't think it matters much (e.g., "Relationship matters more", "Doesn't change anything").
+BELIEF_HIGH    : Clearly believes response time is critical for getting emergency jobs (e.g., "Response time is huge", "First caller usually wins", "If I don't answer, they call the next guy").
+BELIEF_MEDIUM  : Thinks it matters but isn't the only factor (e.g., "It helps but relationships matter too", "Price matters more").
+BELIEF_LOW     : Doesn't think response time matters much (e.g., "Customers will wait", "I have a good reputation").
 BELIEF_UNKNOWN : Unclear or off-topic regarding response time beliefs.
 
 REPLY LOGIC:
 - If AGENT_HANDLES:
   DO NOT immediately pitch the product.
-  Acknowledge that they handle it. Relate to how that works {situation}.
-  If Ask Follow-up Question is True, ask a simple follow-up like "Do you usually answer those leads immediately or once you're free?"
+  Acknowledge that they handle it. Relate to how that works {situation} and the revenue risk.
+  If Ask Follow-up Question is True, ask a simple follow-up like "Do you usually answer those calls immediately or once you're free?"
   Otherwise, just make the observation and stop.
 
 - If ASSISTANT_HANDLES:
-  Acknowledge they have help. Mention how {situation} usually still leaves gaps.
-  If Ask Follow-up Question is True, ask if leads ever still sit for a bit during busy hours.
+  Acknowledge they have help. Mention how {situation} usually still leaves gaps even with support.
 
 - If INTERESTED:
-  Briefly explain how we help with response time. If someone inquires {situation}, they get an instant response until you can jump in.
+  Briefly explain how we help with response time. If someone calls {situation}, they get an instant response until you can jump in.
 
 Respond ONLY with valid JSON:
 {{
@@ -230,7 +232,7 @@ Respond ONLY with valid JSON:
 }}
 """
 
-def _groq_analyze_reply(text: str, property_address: str = "your listing", my_name: str = "the team", conversation_state: dict | None = None, gen_params: dict | None = None, variant_tag: str | None = None, chosen_question: str | None = None) -> dict | None:
+def _groq_analyze_reply(text: str, property_address: str = "your service area", my_name: str = "the team", conversation_state: dict | None = None, gen_params: dict | None = None, variant_tag: str | None = None, chosen_question: str | None = None) -> dict | None:
     """
     Primary intelligence layer.
     Calls Groq to READ the reply, classify intent properly, and generate
@@ -354,7 +356,7 @@ def _groq_classify_llm(text: str) -> str | None:
                     "model":  "llama-3.1-8b-instant",
                     "messages": [
                         {"role": "system", "content": (
-                            "You classify cold outreach reply intent for a real estate service.  "
+                            "You classify cold outreach reply intent for an emergency home services company.  "
                             "Respond with EXACTLY one label and nothing else:\n"
                             "AGENT_HANDLES | NOBODY_HANDLES | ASSISTANT_HANDLES | INTERESTED | "
                             "ASKS_PRICE | ASKS_DETAILS | ASKS_IDENTITY | ACKNOWLEDGMENT_ONLY |  "
@@ -417,7 +419,7 @@ _RE_ACKNOWLEDGMENT = re.compile(
 _RE_AGENT_HANDLES = re.compile(r"\b(i do|me|myself|i handle|i reply)\b", re.I)
 _RE_NOBODY_HANDLES = re.compile(r"\b(nobody|no one|don't have|none|miss)\b", re.I)
 _RE_ASSISTANT_HANDLES = re.compile(r"\b(assistant|team|secretary|va|office)\b", re.I)
-_RE_NOT_RELEVANT = re.compile(r"\b(raw land|land|sold|not my|wrong (listing|property))\b", re.I)
+_RE_NOT_RELEVANT = re.compile(r"\b(cleaning|painting|landscaping|insurance|carpet|hvac|renovation|remodeling|pool|home automation|security system| termite|pest control|home warranty)\b", re.I)
 _RE_CONFUSED = re.compile(r"\b(what (do you mean|is this|are you expecting|kind of response)|is this a sales|confused|don't understand)\b", re.I)
 
 #── Intent classifier ─────────────────────────────────────────────────────────
@@ -473,14 +475,14 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
 
     return 'UNKNOWN'
 
-#── Auto-reply templates (Fallbacks) ─────────────────────────────────────────
+#── Auto-reply templates (Emergency Home Services Fallbacks) ─────────────────
 def _tmpl_ps() -> str:
     return "\n\nP.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
 
 def _tmpl_asks_identity(my_name: str, gp: dict) -> str:
-    body = f"{gp['opener']} We help with speed-to-lead by handling inbound property inquiries instantly when you're busy {gp['situation']}. "
+    body = f"{gp['opener']} We help with speed-to-lead by handling inbound urgent service requests instantly when you're busy {gp['situation']}. "
     if gp['ask_question']:
-        body += "Happy to show you a couple real examples if helpful?"
+        body += "Happy to show you how it works if helpful?"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_agent_handles(my_name: str, gp: dict, variant_tag: str = None, chosen_question: str = None) -> str:
@@ -493,49 +495,49 @@ def _tmpl_agent_handles(my_name: str, gp: dict, variant_tag: str = None, chosen_
     if gp['style_mode'] == 'very_short':
         return f"{gp['opener']}\n\n— {my_name}"
 
-    body = f"{gp['opener']} Most agents I talk to reply themselves too — it just gets tough {gp['situation']}."
+    body = f"{gp['opener']} Most service techs I talk to handle calls themselves too — it just gets tough {gp['situation']}."
     if gp['ask_question']:
-        body += "\n\nDo you usually answer those leads immediately or once you're free?"
+        body += "\n\nDo you usually answer those calls immediately or once you're free?"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_nobody_handles(my_name: str, gp: dict) -> str:
-    body = f"{gp['opener']} Missed leads usually mean missed commissions, especially {gp['situation']}."
+    body = f"{gp['opener']} Missed emergency calls usually mean lost jobs — especially {gp['situation']}, the customer just calls the next guy."
     if gp['ask_question']:
-        body += "\n\nDo leads ever sit for a bit during busy hours or do you usually get to them pretty fast?"
+        body += "\n\nDo calls ever sit for a bit during busy hours or do you usually get to them pretty fast?"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_assistant_handles(my_name: str, gp: dict) -> str:
-    body = f"{gp['opener']} A lot of teams I talk to already have someone helping with inbound."
+    body = f"{gp['opener']} A lot of shops I talk to already have someone handling the phones."
     if gp['ask_question']:
-        body += f"\n\nOut of curiosity, do leads ever still sit for a bit {gp['situation']} or is response time pretty locked in?"
+        body += f"\n\nOut of curiosity, do calls ever still slip through {gp['situation']} or is response time pretty locked in?"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_interested(my_name: str, gp: dict) -> str:
-    body = f"Mainly helps with speed-to-lead. If someone inquires {gp['situation']}, they instantly get property details handled until you can jump back in."
+    body = f"Mainly helps with speed-to-lead. If someone calls {gp['situation']}, they instantly get a response handled until you can jump back in."
     if gp['ask_question']:
-        body += "\n\nHappy to show you a couple real examples if helpful?"
+        body += "\n\nHappy to show you how it works if helpful?"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_asks_price(my_name: str, gp: dict) -> str:
-    body = f"{gp['opener']} We usually show you the results first so you can see how it handles the busy work for you."
+    body = f"{gp['opener']} We usually show you the results first so you can see what you're missing when you're {gp['situation']}."
     if gp['ask_question']:
-        body += "\n\nHappy to show you a couple real examples if that helps?"
+        body += "\n\nHappy to show you a quick example if that helps?"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_asks_details(my_name: str, gp: dict) -> str:
-    body = f"It's zero manual work for you. We help with speed-to-lead so inquiries stay engaged {gp['situation']} while you're busy."
+    body = f"It's zero manual work for you. We help with speed-to-lead so urgent requests get answered {gp['situation']} while you're busy."
     if gp['ask_question']:
-        body += "\n\nHappy to show you a couple real examples if helpful?"
+        body += "\n\nHappy to show you how it works if helpful?"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_not_relevant(my_name: str, property_address: str, gp: dict) -> str:
-    body = f"{gp['opener']} {property_address} probably doesn't get the same 'is it still available' heat as a residential listing."
+    body = f"{gp['opener']} Looks like you might be in a different type of service business — we're specifically looking for plumbers, HVAC, and locksmiths."
     if gp['ask_question']:
-        body += "\n\nDo you have any other residential properties where those quick inquiry texts become a distraction?"
+        body += "\n\nDo you happen to do any emergency service calls on the side?"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_confused(my_name: str, property_address: str, gp: dict) -> str:
-    body = f"Sorry for the lack of context! I saw your listing for {property_address} and was just curious how you handle those quick property inquiries {gp['situation']}."
+    body = f"Sorry for the confusion! We were asking about how you handle urgent inbound calls — like when someone's AC goes out or a pipe bursts."
     if gp['ask_question']:
         body += "\n\nDo you usually get to those right away or once you're free?"
     return f"{body}\n\n— {my_name}"
@@ -543,7 +545,7 @@ def _tmpl_confused(my_name: str, property_address: str, gp: dict) -> str:
 def _tmpl_pass_unsub() -> str:
     return (
         "Understood — removing you from our list now. "
-        "Best of luck with your listings!"
+        "Good luck with the service calls!"
     )
 
 def _tmpl_negative_objection() -> str:
@@ -720,7 +722,7 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
     if not body_text.strip():
         return
 
-    property_address = lead.get('open_house') or "your listing"
+    property_address = lead.get('open_house') or "your service area"
     my_name = account.get('display_name') or "the team"
 
     analysis = _analyze_and_handle_reply(
@@ -1215,7 +1217,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     if not body_text.strip():
         return
 
-    property_address = lead.get('open_house') or "your listing"
+    property_address = lead.get('open_house') or "your service area"
     my_name = account.get('display_name') or "the team"
 
     analysis = _analyze_and_handle_reply(

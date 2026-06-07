@@ -53,11 +53,11 @@ def generate_reply_prompt():
 def generate_fallback_response(prompt):
     """Generate a simple fallback response when the AI service is unavailable"""
     return {
-        "reply": f"Hi there! Thanks for your message about the open house. I'd be happy to help you with your real estate needs. When were you thinking of coming by for a viewing?",
+        "reply": f"Hi there! Thanks for reaching out about our emergency services. I'd be happy to help with your HVAC, plumbing, or locksmith needs. What seems to be the issue?",
         "follow_ups": [
-            "Just following up on your interest in our open house. Did you have a chance to think about scheduling a viewing?",
-            "I wanted to check in again about the property. We've had quite a bit of interest, so let me know if you'd like me to hold a specific time for you!",
-            "Final follow-up about the property. We're finalizing viewings this week, so please let me know if you're still interested."
+            "Just following up on your inquiry — have you had a chance to think about scheduling a service visit?",
+            "I wanted to check in again about your service request. We've had quite a bit of demand, so let me know if you'd like me to hold a spot for you!",
+            "Final follow-up about your service request. We're booking out this week, so please let me know if you're still interested."
         ]
     }
 

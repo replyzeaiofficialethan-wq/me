@@ -1,4 +1,4 @@
-# worker.py  –  Gmail API + SMTP edition
+# worker.py  –  Gmail API + SMTP edition (HARDENED)
 #
 # HOW SENDING WORKS:
 #   1. Pull queued emails due now (sent_at IS NULL, scheduled_for <= now)
@@ -11,6 +11,13 @@
 #      SMTP path:  decrypt smtp_password → connect via smtplib → STARTTLS/SSL
 #   5. Mark sent, increment daily + hourly count, schedule next follow-up
 #
+# HARDENING FEATURES:
+#   - Exponential backoff retries for transient failures
+#   - Account quarantine on rate-limit errors (429)
+#   - Token refresh failure detection (marks account as disconnected)
+#   - Error logging to database for failed sends
+#   - SMTP connection timeouts to prevent hanging
+#
 # REQUIRED DB CHANGE (run once in Supabase SQL editor):
 #   ALTER TABLE lead_campaign_accounts
 #     ADD COLUMN IF NOT EXISTS smtp_account TEXT,
@@ -18,8 +25,8 @@
 #
 # THROTTLING (actually works with GitHub Actions cron):
 #   - MAX_EMAILS_PER_RUN   : hard cap per worker invocation (default 50)
-#   - MAX_EMAILS_PER_HOUR  : global hourly budget across ALL runs (default 100)
-#   - GMAIL_DAILY_LIMIT    : per-account daily cap (default 500)
+#   - MAX_EMAILS_PER_HOUR : global hourly budget across ALL runs (default 100)
+#   - GMAIL_DAILY_LIMIT    : per-account daily cap (default 100 — lowered from 500)
 #   - send_delay_seconds / send_jitter_seconds in campaigns table stagger
 #     the scheduled_for timestamps so emails drip out across time windows.
 #     DO NOT use time.sleep() — it wastes runner minutes and doesn't prevent
@@ -33,13 +40,27 @@
 #   GOOGLE_CLIENT_SECRET    (from Google Cloud Console)
 #
 # OPTIONAL ENV VARS:
-#   GMAIL_DAILY_LIMIT       (default: 500)
-#   MAX_EMAILS_PER_RUN      (default: 50)   — cap per single worker run
+#   GMAIL_DAILY_LIMIT       (default: 100)   — per-account daily cap (SAFE default)
+#   MAX_EMAILS_PER_RUN      (default: 50)    — cap per single worker run
 #   MAX_EMAILS_PER_HOUR     (default: 100)  — global cap across all runs in a window
+#   SEND_RETRY_ATTEMPTS     (default: 3)     — max retries per email on transient failure
+#   SEND_RETRY_BASE_DELAY   (default: 2)     — base delay seconds for exponential backoff
 #
 # REQUIRED DB CHANGES (run once):
 #   -- Claim lock: prevents two workers sending the same email
 #   ALTER TABLE email_queue ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
+#
+#   -- Error log table for failed sends
+#   CREATE TABLE IF NOT EXISTS send_errors (
+#       id              BIGSERIAL PRIMARY KEY,
+#       queue_id        INTEGER REFERENCES email_queue(id),
+#       account_email   TEXT,
+#       to_email        TEXT,
+#       error_code      TEXT,
+#       error_message   TEXT,
+#       retry_count     INTEGER DEFAULT 0,
+#       created_at      TIMESTAMPTZ DEFAULT NOW()
+#   );
 #
 #   -- Hourly counts table (mirrors daily_email_counts but per-hour)
 #   CREATE TABLE IF NOT EXISTS hourly_email_counts (
@@ -49,9 +70,9 @@
 #       UNIQUE (window_start)
 #   );
 #
-# ── FIX: REQUIRED SQL FUNCTIONS (run once in Supabase SQL editor) ─────────────
+# ── SQL FUNCTIONS (run once in Supabase SQL editor) ──────────────────────────
 #
-#   -- 1. Atomic hourly counter increment (fixes race condition in increment_hourly_count)
+#   -- 1. Atomic hourly counter increment
 #   CREATE OR REPLACE FUNCTION increment_hourly_count(p_window TIMESTAMPTZ, p_by INT)
 #   RETURNS void LANGUAGE sql AS $$
 #     INSERT INTO hourly_email_counts (window_start, count)
@@ -60,7 +81,7 @@
 #     DO UPDATE SET count = hourly_email_counts.count + p_by;
 #   $$;
 #
-#   -- 2. Atomic claim + stale-release in one query (fixes race window in claim_emails)
+#   -- 2. Atomic claim + stale-release
 #   CREATE OR REPLACE FUNCTION claim_emails(p_limit INT, p_now TIMESTAMPTZ, p_stale TIMESTAMPTZ)
 #   RETURNS SETOF email_queue LANGUAGE sql AS $$
 #     UPDATE email_queue SET claimed_at = NULL
@@ -81,6 +102,7 @@ import os
 import base64
 import random
 import re
+import time
 import smtplib
 import requests
 import urllib.parse
@@ -95,10 +117,12 @@ SUPABASE_URL = os.environ['SUPABASE_URL']
 SUPABASE_KEY = os.environ['SUPABASE_SERVICE_ROLE_KEY']
 supabase     = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ── Throttle config ───────────────────────────────────────────────────────────
-MAX_EMAILS_PER_RUN  = int(os.environ.get('MAX_EMAILS_PER_RUN',  50))
-MAX_EMAILS_PER_HOUR = int(os.environ.get('MAX_EMAILS_PER_HOUR', 100))
-DAILY_LIMIT         = int(os.environ.get('GMAIL_DAILY_LIMIT',   500))
+# ── Throttle config (HARDENED: DAILY_LIMIT lowered to 100 for safety) ─────────
+MAX_EMAILS_PER_RUN     = int(os.environ.get('MAX_EMAILS_PER_RUN',  50))
+MAX_EMAILS_PER_HOUR   = int(os.environ.get('MAX_EMAILS_PER_HOUR', 100))
+DAILY_LIMIT           = int(os.environ.get('GMAIL_DAILY_LIMIT',   100))  # Lowered from 500!
+SEND_RETRY_ATTEMPTS   = int(os.environ.get('SEND_RETRY_ATTEMPTS', 3))
+SEND_RETRY_BASE_DELAY = int(os.environ.get('SEND_RETRY_BASE_DELAY', 2))
 
 # ── Encryption ────────────────────────────────────────────────────────────────
 ENCRYPTION_KEY = bytes.fromhex(os.environ['ENCRYPTION_KEY'])
@@ -136,14 +160,36 @@ def render_email_template(template: str, lead_data: dict) -> str:
     return rendered
 
 
+# ── Error logging helper ────────────────────────────────────────────────────────
+def log_send_error(queue_id: int, account_email: str, to_email: str,
+                   error_code: str, error_message: str, retry_count: int = 0):
+    """Log a failed send attempt to the database for tracking and debugging."""
+    try:
+        supabase.table("send_errors").insert({
+            "queue_id":      queue_id,
+            "account_email": account_email,
+            "to_email":      to_email,
+            "error_code":    error_code,
+            "error_message": error_message[:500] if error_message else "",
+            "retry_count":   retry_count,
+            "created_at":    datetime.now(timezone.utc).isoformat(),
+        }).execute()
+    except Exception as e:
+        print(f"[ERROR LOG FAIL] Could not log to send_errors table: {e}")
+
+
 # ── Gmail API helpers ─────────────────────────────────────────────────────────
-GOOGLE_TOKEN_URL     = "https://oauth2.googleapis.com/token"
+GOOGLE_TOKEN_URL      = "https://oauth2.googleapis.com/token"
 GOOGLE_GMAIL_SEND    = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
 GOOGLE_CLIENT_ID     = os.environ.get('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
 
 
-def get_gmail_access_token(encrypted_refresh_token: str) -> str | None:
+def get_gmail_access_token(encrypted_refresh_token: str, account_email: str = None) -> str | None:
+    """
+    Get a fresh Gmail access token using the refresh token.
+    If refresh fails (revoked token, etc.), mark the account as disconnected.
+    """
     try:
         refresh_token = aesgcm_decrypt(encrypted_refresh_token)
         resp = requests.post(GOOGLE_TOKEN_URL, data={
@@ -156,22 +202,41 @@ def get_gmail_access_token(encrypted_refresh_token: str) -> str | None:
         if resp.status_code == 200:
             return resp.json().get("access_token")
 
-        print(f"[TOKEN ERROR] {resp.status_code}: {resp.text}")
+        error_detail = f"{resp.status_code}: {resp.text[:200]}"
+        print(f"[TOKEN ERROR] {account_email}: {error_detail}")
+
+        # Check if token is revoked or invalid — mark account as disconnected
+        if resp.status_code in (400, 401, 403):
+            if account_email:
+                print(f"[TOKEN REVOKED] Marking {account_email} as disconnected")
+                try:
+                    supabase.table("gmail_accounts").update({
+                        "gmail_connected": False
+                    }).eq("email", account_email).execute()
+                except Exception as mark_err:
+                    print(f"[TOKEN MARK ERROR] {mark_err}")
+
         return None
 
     except Exception as e:
-        print(f"[TOKEN EXCEPTION] {e}")
+        print(f"[TOKEN EXCEPTION] {account_email}: {e}")
         return None
 
 
 def send_email_via_gmail(account: dict, to_email: str,
                           subject: str, html_body: str,
                           thread_id: str = None, in_reply_to: str = None,
-                          references: str = None) -> bool:
-    access_token = get_gmail_access_token(account["encrypted_refresh_token"])
+                          references: str = None) -> tuple[bool, str | None]:
+    """
+    Send email via Gmail API.
+    Returns: (success: bool, error_code: str | None)
+    """
+    access_token = get_gmail_access_token(
+        account["encrypted_refresh_token"],
+        account["email"]
+    )
     if not access_token:
-        print(f"[GMAIL] Cannot get access token for {account['email']}")
-        return False
+        return False, "TOKEN_ERROR"
 
     try:
         msg            = MIMEText(html_body, "html", "utf-8")
@@ -193,28 +258,43 @@ def send_email_via_gmail(account: dict, to_email: str,
             GOOGLE_GMAIL_SEND,
             headers={
                 "Authorization": f"Bearer {access_token}",
-                "Content-Type":  "application/json",
+                "Content-Type": "application/json"
             },
             json=payload,
-            timeout=30,
+            timeout=30
         )
 
         if resp.status_code in (200, 201):
-            return True
+            return True, None
 
-        print(f"[GMAIL SEND ERROR] {account['email']} -> {to_email}: "
-              f"{resp.status_code} {resp.text}")
-        return False
+        error_detail = f"{resp.status_code}: {resp.text[:200]}"
+        print(f"[GMAIL SEND ERROR] {account['email']} -> {to_email}: {error_detail}")
 
+        # Handle rate limiting — return special code so caller can quarantine account
+        if resp.status_code == 429:
+            print(f"[RATE LIMIT] Account {account['email']} hit rate limit — will quarantine")
+            return False, "RATE_LIMIT"
+
+        return False, f"HTTP_{resp.status_code}"
+
+    except requests.exceptions.Timeout:
+        print(f"[GMAIL TIMEOUT] {account['email']} -> {to_email}")
+        return False, "TIMEOUT"
+    except requests.exceptions.ConnectionError as e:
+        print(f"[GMAIL CONNECTION ERROR] {account['email']} -> {to_email}: {e}")
+        return False, "CONNECTION_ERROR"
     except Exception as e:
-        print(f"[GMAIL EXCEPTION] {to_email}: {e}")
-        return False
+        print(f"[GMAIL EXCEPTION] {account['email']} -> {to_email}: {e}")
+        return False, "EXCEPTION"
 
 
 def send_email_via_smtp(account: dict, to_email: str,
-                        subject: str, html_body: str,
-                        in_reply_to: str = None, references: str = None) -> bool:
-    """Send one email via plain SMTP using stored credentials."""
+                         subject: str, html_body: str,
+                         in_reply_to: str = None, references: str = None) -> tuple[bool, str | None]:
+    """
+    Send one email via SMTP with connection timeouts.
+    Returns: (success: bool, error_code: str | None)
+    """
     try:
         password    = aesgcm_decrypt(account["encrypted_smtp_password"])
         sender_name = account.get("display_name") or account["email"]
@@ -231,25 +311,60 @@ def send_email_via_smtp(account: dict, to_email: str,
 
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
+        # Connection timeout to prevent hanging on dead SMTP servers
+        connection_timeout = 15
+
         if port == 465:
-            server = smtplib.SMTP_SSL(account["smtp_host"], port, timeout=30)
+            server = smtplib.SMTP_SSL(
+                account["smtp_host"], port,
+                timeout=connection_timeout
+            )
         else:
-            server = smtplib.SMTP(account["smtp_host"], port, timeout=30)
+            server = smtplib.SMTP(
+                account["smtp_host"], port,
+                timeout=connection_timeout
+            )
             server.ehlo()
             server.starttls()
             server.ehlo()
 
         server.login(account["smtp_username"], password)
         server.sendmail(account["email"], [to_email], msg.as_string())
-        server.quit()
-        return True
+        
+        try:
+            server.quit()
+        except:
+            pass  # Ignore quit errors on success
+
+        return True, None
 
     except smtplib.SMTPAuthenticationError as e:
         print(f"[SMTP AUTH ERROR] {account['email']}: {e}")
-        return False
-    except Exception as e:
+        return False, "SMTP_AUTH"
+    except smtplib.SMTPConnectError as e:
+        print(f"[SMTP CONNECT ERROR] {account['email']} -> {to_email}: {e}")
+        return False, "SMTP_CONNECT"
+    except smtplib.SMTPRecipientsRefused as e:
+        print(f"[SMTP RECIPIENT REFUSED] {to_email}: {e}")
+        return False, "RECIPIENT_REFUSED"
+    except smtplib.SMTPSenderRefused as e:
+        print(f"[SMTP SENDER REFUSED] {account['email']}: {e}")
+        return False, "SENDER_REFUSED"
+    except smtplib.SMTPDataError as e:
+        print(f"[SMTP DATA ERROR] {account['email']} -> {to_email}: {e}")
+        return False, "SMTP_DATA"
+    except smtplib.SMTPServerDisconnected as e:
+        print(f"[SMTP DISCONNECTED] {account['email']}: {e}")
+        return False, "SMTP_DISCONNECTED"
+    except smtplib.SMTPException as e:
         print(f"[SMTP EXCEPTION] {account['email']} -> {to_email}: {e}")
-        return False
+        return False, "SMTP_EXCEPTION"
+    except TimeoutError as e:
+        print(f"[SMTP TIMEOUT] {account['email']} -> {to_email}: {e}")
+        return False, "SMTP_TIMEOUT"
+    except Exception as e:
+        print(f"[SMTP ERROR] {account['email']} -> {to_email}: {e}")
+        return False, "SMTP_ERROR"
 
 
 # ── Hourly rate limiter ───────────────────────────────────────────────────────
@@ -273,12 +388,6 @@ def get_hourly_sent_count() -> int:
         return 0
 
 
-# FIX: replaced non-atomic read-modify-write with a single atomic SQL upsert via RPC.
-# Two concurrent workers previously both read the same count, each added 1, and both
-# wrote back the same value — effectively counting only one send instead of two.
-# The SQL function uses INSERT ... ON CONFLICT DO UPDATE SET count = count + p_by
-# which is evaluated atomically by Postgres, so concurrent calls can never collide.
-# Make sure you have created the `increment_hourly_count` SQL function (see header).
 def increment_hourly_count(by: int = 1):
     """Atomically increment the hourly counter via a Postgres upsert function."""
     window = current_hour_window()
@@ -291,279 +400,197 @@ def increment_hourly_count(by: int = 1):
         print(f"[HOURLY INCREMENT ERROR] {e}")
 
 
-# ── Claim lock ────────────────────────────────────────────────────────────────
-# FIX: replaced two-step fetch-then-update with a single atomic SQL function via RPC.
-# The old approach had a race window: two concurrent workers could both SELECT the same
-# unclaimed rows and then both UPDATE claimed_at on those same IDs — causing duplicate
-# sends. The SQL function uses FOR UPDATE SKIP LOCKED, which is Postgres's native
-# row-level advisory lock that guarantees each row is claimed by exactly one caller.
-# Make sure you have created the `claim_emails` SQL function (see header).
+# ── Claim lock ───────────────────────────────────────────────────────────────
 def claim_emails(limit: int) -> list:
-    """
-    Fetch and atomically claim unsent emails due now.
-
-    Uses a single Postgres function with FOR UPDATE SKIP LOCKED so that
-    concurrent workers can never claim the same row. Stale claims (worker
-    crashed mid-batch, claimed_at set > 10 min ago with no sent_at) are
-    released in the same atomic call.
-    """
+    """Atomically claim emails using a SQL function."""
     now             = datetime.now(timezone.utc)
-    stale_threshold = (now - timedelta(minutes=10)).isoformat()
-
+    stale_threshold = now - timedelta(minutes=10)
     try:
         result = supabase.rpc("claim_emails", {
             "p_limit": limit,
-            "p_now":   now.isoformat(),
-            "p_stale": stale_threshold,
-        }).execute()
-        return result.data if result.data else []
-    except Exception as e:
-        print(f"[CLAIM ERROR] {e}")
-        return []
-
-
-def unclaim_email(email_id):
-    """Release a claim if the send failed (so another run can retry)."""
-    try:
-        supabase.table("email_queue") \
-            .update({"claimed_at": None}) \
-            .eq("id", email_id) \
-            .execute()
-    except Exception:
-        pass
-
-
-# ── Account management ────────────────────────────────────────────────────────
-def get_account_for_lead_campaign(lead_id, campaign_id):
-    """
-    Return the sticky sender account for this lead+campaign, or None.
-    ONLY returns Gmail accounts. If previously assigned to SMTP, returns None
-    to force reassignment to a Gmail account.
-    """
-    try:
-        row = supabase.table("lead_campaign_accounts") \
-            .select("gmail_account, sender_type") \
-            .eq("lead_id", lead_id) \
-            .eq("campaign_id", campaign_id) \
-            .execute()
-
-        if not row.data:
-            return None
-
-        r            = row.data[0]
-        sender_type  = r.get("sender_type") or "gmail"
-        gmail_email  = r.get("gmail_account")
-
-        if sender_type == "smtp":
-            return None # Force reassignment to Gmail
-
-        if gmail_email:
-            acct = supabase.table("gmail_accounts") \
-                .select("*") \
-                .eq("email", gmail_email) \
-                .single() \
-                .execute()
-            if acct.data:
-                acct.data["_type"] = "gmail"
-                return acct.data
-
-    except Exception:
-        pass
-    return None
-
-
-def assign_account_to_lead_campaign(lead_id, campaign_id, account_email: str,
-                                     sender_type: str = "gmail"):
-    payload = {
-        "lead_id":     lead_id,
-        "campaign_id": campaign_id,
-        "sender_type": sender_type,
-    }
-    if sender_type == "smtp":
-        payload["smtp_account"]  = account_email
-    else:
-        payload["gmail_account"] = account_email
-
-    supabase.table("lead_campaign_accounts").upsert(payload).execute()
-
-
-def get_all_accounts_with_capacity() -> list:
-    """
-    Return all sending Gmail accounts that still have daily capacity.
-    SMTP accounts are excluded from automated sending.
-    """
-    today  = date.today().isoformat()
-    result = []
-
-    # ── Gmail accounts ────────────────────────────────────────────────────────
-    gmail_rows = supabase.table("gmail_accounts") \
-        .select("*") \
-        .eq("gmail_connected", True) \
-        .execute()
-
-    for acct in (gmail_rows.data or []):
-        cd = supabase.table("daily_email_counts") \
-            .select("count") \
-            .eq("email_account", acct["email"]) \
-            .eq("date", today) \
-            .execute()
-        count     = cd.data[0]["count"] if cd.data else 0
-        remaining = DAILY_LIMIT - count
-        if remaining > 0:
-            acct["_type"] = "gmail"
-            result.append({
-                "account":     acct,
-                "sent_today":  count,
-                "remaining":   remaining,
-                "daily_limit": DAILY_LIMIT,
-            })
-
-    # Sort by remaining capacity to help balance load, but also randomize 
-    # to avoid always hitting the same account first across different runs.
-    random.shuffle(result)
-    result.sort(key=lambda x: x["remaining"], reverse=True)
-    return result
-
-
-def update_daily_count(email_account: str, new_count: int):
-    today    = date.today().isoformat()
-    existing = supabase.table("daily_email_counts") \
-        .select("id") \
-        .eq("email_account", email_account) \
-        .eq("date", today) \
-        .execute()
-
-    if existing.data:
-        supabase.table("daily_email_counts") \
-            .update({"count": new_count}) \
-            .eq("email_account", email_account) \
-            .eq("date", today) \
-            .execute()
-    else:
-        supabase.table("daily_email_counts") \
-            .insert({"email_account": email_account,
-                     "date": today, "count": new_count}) \
-            .execute()
-
-
-# ── URL tracking ───────────────────────────────────────────────────────────────
-def replace_urls_with_tracking(html_content, lead_id, campaign_id,
-                                email_queue_id=None) -> str:
-    app_base_url = os.environ.get('APP_BASE_URL', 'https://replyzeai.com/goods')
-
-    def _replace(match):
-        url = match.group(1)
-        if '/track/' in url or url.startswith('mailto:'):
-            return match.group(0)
-        encoded = urllib.parse.quote(url)
-        turl    = f"{app_base_url}/track/{lead_id}/{campaign_id}?url={encoded}"
-        if email_queue_id:
-            turl += f"&eqid={email_queue_id}"
-        return f'href="{turl}"'
-
-    return re.sub(r'href="(.*?)"', _replace, html_content)
-
-
-# ── Follow-up scheduler ────────────────────────────────────────────────────────
-# FIX: now reads send_delay_seconds and send_jitter_seconds from the campaign row
-# and applies them to the scheduled_for timestamp. Previously the function computed
-# send_date as exactly now + days_after_previous with no randomisation, so every
-# follow-up fired at the exact same second regardless of campaign jitter settings.
-def schedule_followup(q: dict, sequence: int, account_email: str):
-    """Queue the next follow-up for this lead/campaign, with delay + jitter applied."""
-    try:
-        fu = supabase.table("campaign_followups") \
-            .select("*") \
-            .eq("campaign_id", q["campaign_id"]) \
-            .eq("sequence", sequence) \
-            .execute()
-
-        if not fu.data:
-            return
-
-        fu   = fu.data[0]
-        lead = supabase.table("leads") \
-            .select("*").eq("id", q["lead_id"]).single().execute()
-
-        if not lead.data:
-            return
-
-        # Fetch campaign-level send pacing settings
-        camp = supabase.table("campaigns") \
-            .select("send_delay_seconds, send_jitter_seconds") \
-            .eq("id", q["campaign_id"]) \
-            .single() \
-            .execute()
-
-        delay  = int((camp.data or {}).get("send_delay_seconds") or 0)
-        jitter = int((camp.data or {}).get("send_jitter_seconds") or 0)
-        # Apply a random offset within [0, jitter] so each follow-up gets a
-        # unique scheduled_for rather than all firing at the same second.
-        offset_seconds = delay + (random.randint(0, jitter) if jitter > 0 else 0)
-
-        send_date = (
-            datetime.now(timezone.utc)
-            + timedelta(days=fu["days_after_previous"])
-            + timedelta(seconds=offset_seconds)
-        )
-
-        supabase.table("email_queue").insert({
-            "campaign_id":   q["campaign_id"],
-            "lead_id":       q["lead_id"],
-            "lead_email":    q["lead_email"],
-            "subject":       render_email_template(fu["subject"], lead.data),
-            "body":          render_email_template(fu["body"],    lead.data),
-            "sequence":      sequence,
-            "scheduled_for": send_date.isoformat(),
-        }).execute()
-
-    except Exception as e:
-        print(f"[FOLLOWUP ERROR] seq={sequence}: {e}")
-
-
-# ── Main send loop ─────────────────────────────────────────────────────────────
-def send_queued():
-    print("=" * 60)
-    print("WORKER START  (Gmail API + SMTP mode)")
-    now = datetime.now(timezone.utc)
-    print(f"UTC: {now.isoformat()}")
-
-    # ── Hourly budget check ───────────────────────────────────────────────────
-    hourly_sent = get_hourly_sent_count()
-    hourly_remaining = MAX_EMAILS_PER_HOUR - hourly_sent
-    print(f"Hourly budget: {hourly_sent} sent / {MAX_EMAILS_PER_HOUR} max "
-          f"({hourly_remaining} remaining this hour)")
-
-    if hourly_remaining <= 0:
-        print("[THROTTLED] Hourly send limit reached. Exiting.")
-        print("=" * 60)
-        return
-
-    # ── How many can we send this run? ───────────────────────────────────────
-    # Respect both the per-run cap and whatever hourly budget is left
-    fetch_limit = min(MAX_EMAILS_PER_RUN, hourly_remaining)
-    print(f"Will process up to {fetch_limit} emails this run "
-          f"(per-run cap={MAX_EMAILS_PER_RUN}, hourly remaining={hourly_remaining})")
-
-    # ── Claim emails atomically ───────────────────────────────────────────────
-    # Modified claim logic to include new threading columns
-    now             = datetime.now(timezone.utc)
-    stale_threshold = (now - timedelta(minutes=10)).isoformat()
-
-    try:
-        # Note: RPC claim_emails needs to return the new columns too if it doesn't already
-        # Assuming * in the RPC returns all columns.
-        result = supabase.rpc("claim_emails", {
-            "p_limit": fetch_limit,
-            "p_now":   now.isoformat(),
-            "p_stale": stale_threshold,
+            "p_now":    now.isoformat(),
+            "p_stale":  stale_threshold.isoformat(),
         }).execute()
         queued = result.data if result.data else []
     except Exception as e:
         print(f"[CLAIM ERROR] {e}")
         queued = []
     print(f"Emails claimed for this run: {len(queued)}")
+    return queued
 
+
+def unclaim_email(email_id):
+    """Clear the claim lock so the email can be retried."""
+    try:
+        supabase.table("email_queue").update({
+            "claimed_at": None
+        }).eq("id", email_id).execute()
+    except Exception as e:
+        print(f"[UNCLAIM ERROR] {e}")
+
+
+# ── Account assignment (sticky per lead/campaign) ────────────────────────────
+def get_account_for_lead_campaign(lead_id, campaign_id):
+    try:
+        row = supabase.table("lead_campaign_accounts").select("*") \
+            .eq("lead_id", lead_id).eq("campaign_id", campaign_id).execute()
+        return row.data[0] if row.data else None
+    except Exception:
+        return None
+
+
+def assign_account_to_lead_campaign(lead_id, campaign_id, account_email: str,
+                                     sender_type: str = "gmail"):
+    try:
+        supabase.table("lead_campaign_accounts").upsert({
+            "lead_id":      lead_id,
+            "campaign_id":  campaign_id,
+            "account_email": account_email,
+            "sender_type":  sender_type,
+        }, on_conflict="lead_id,campaign_id").execute()
+    except Exception as e:
+        print(f"[ASSIGN ERROR] {e}")
+
+
+# ── Account capacity ──────────────────────────────────────────────────────────
+def get_all_accounts_with_capacity() -> list:
+    """
+    Returns list of accounts that still have daily sending capacity.
+    Each entry: {"account": {...}, "sent_today": int, "remaining": int}
+    """
+    today = date.today().isoformat()
+    result = []
+
+    # ── Gmail accounts ────────────────────────────────────────────────────────
+    gmail_rows = supabase.table("gmail_accounts").select("*").execute()
+    for acct in gmail_rows.data:
+        if not acct.get("gmail_connected", True):
+            print(f"  [SKIP] {acct['email']} — gmail_connected=False")
+            continue
+
+        today_count = 0
+        try:
+            row = supabase.table("daily_email_counts").select("count") \
+                .eq("account_email", acct["email"]) \
+                .eq("date", today).execute()
+            today_count = row.data[0]["count"] if row.data else 0
+        except Exception:
+            pass
+
+        remaining = max(0, DAILY_LIMIT - today_count)
+        if remaining > 0:
+            result.append({
+                "account": {**acct, "_type": "gmail"},
+                "sent_today": today_count,
+                "remaining":  remaining
+            })
+        else:
+            print(f"  [SKIP] {acct['email']} — daily limit reached ({today_count}/{DAILY_LIMIT})")
+
+    # ── SMTP accounts ─────────────────────────────────────────────────────────
+    smtp_rows = supabase.table("smtp_accounts").select("*").execute()
+    for acct in smtp_rows.data:
+        today_count = 0
+        try:
+            row = supabase.table("daily_email_counts").select("count") \
+                .eq("account_email", acct["email"]) \
+                .eq("date", today).execute()
+            today_count = row.data[0]["count"] if row.data else 0
+        except Exception:
+            pass
+
+        remaining = max(0, DAILY_LIMIT - today_count)
+        if remaining > 0:
+            result.append({
+                "account": {**acct, "_type": "smtp"},
+                "sent_today": today_count,
+                "remaining":  remaining
+            })
+        else:
+            print(f"  [SKIP] {acct['email']} — SMTP daily limit reached ({today_count}/{DAILY_LIMIT})")
+
+    return result
+
+
+def update_daily_count(email_account: str, new_count: int):
+    today = date.today().isoformat()
+    try:
+        supabase.table("daily_email_counts").upsert({
+            "account_email": email_account,
+            "date":          today,
+            "count":         new_count,
+        }, on_conflict="account_email,date").execute()
+    except Exception as e:
+        print(f"[DAILY COUNT ERROR] {e}")
+
+
+# ── URL tracking ──────────────────────────────────────────────────────────────
+def replace_urls_with_tracking(html_content, lead_id, campaign_id, queue_id):
+    base = os.environ.get('BASE_URL', os.environ.get('APP_URL', 'https://app.example.com'))
+    track_url = f"{base}/t/{lead_id}/{campaign_id}/{queue_id}"
+
+    def _replace(match):
+        original = match.group(0)
+        return f'<a href="{track_url}?url={requests.utils.quote(original)}" target="_blank">{original}</a>'
+
+    return re.sub(r'href="(https?://[^"]+)"', _replace, html_content)
+
+
+# ── Follow-up scheduling ──────────────────────────────────────────────────────
+def schedule_followup(q: dict, sequence: int, account_email: str):
+    """Insert next follow-up into email_queue."""
+    try:
+        campaign = supabase.table("campaigns").select("send_immediately"). \
+            eq("id", q["campaign_id"]).single().execute()
+        if not campaign.data:
+            return
+
+        follow_ups = supabase.table("campaign_followups").select("*") \
+            .eq("campaign_id", q["campaign_id"]) \
+            .eq("sequence", sequence).execute()
+        if not follow_ups.data:
+            return
+
+        fu = follow_ups.data[0]
+        days = fu.get("days_after_previous", 1)
+        scheduled = datetime.now(timezone.utc) + timedelta(days=days)
+
+        supabase.table("email_queue").insert({
+            "campaign_id":   q["campaign_id"],
+            "lead_id":       q["lead_id"],
+            "lead_email":    q["lead_email"],
+            "subject":       fu.get("subject", ""),
+            "body":          fu.get("body", ""),
+            "sequence":      sequence,
+            "scheduled_for": scheduled.isoformat(),
+            "sent_from":     account_email,
+        }).execute()
+    except Exception as e:
+        print(f"[SCHEDULE ERROR] {e}")
+
+
+# ── Main sending loop (HARDENED) ───────────────────────────────────────────────
+def send_queued():
+    print("=" * 60)
+    print("SEND QUEUED  —  Gmail API + SMTP worker (HARDENED)")
+    print(f"UTC: {datetime.now(timezone.utc).isoformat()}")
+    print(f"Config: MAX_PER_RUN={MAX_EMAILS_PER_RUN}  MAX_PER_HOUR={MAX_EMAILS_PER_HOUR}  DAILY_LIMIT={DAILY_LIMIT}")
+
+    # Check hourly limit before starting
+    hourly_sent = get_hourly_sent_count()
+    if hourly_sent >= MAX_EMAILS_PER_HOUR:
+        print(f"[STOPPED] Hourly limit reached ({hourly_sent}/{MAX_EMAILS_PER_HOUR}).")
+        return
+
+    # Respect hourly cap in this run
+    run_budget = min(MAX_EMAILS_PER_RUN, MAX_EMAILS_PER_HOUR - hourly_sent)
+    if run_budget <= 0:
+        print(f"[STOPPED] Hourly budget exhausted.")
+        return
+
+    print(f"Run budget: {run_budget} emails")
+
+    queued = claim_emails(run_budget)
     if not queued:
         all_q  = supabase.table("email_queue").select("id").execute()
         unsent = supabase.table("email_queue").select("*").is_("sent_at", "null").execute()
@@ -574,11 +601,10 @@ def send_queued():
                   f"claimed={e.get('claimed_at', 'null')}")
         return
 
-    # ── Load accounts ─────────────────────────────────────────────────────────
-    available    = get_all_accounts_with_capacity()
+    # Load accounts
+    available = get_all_accounts_with_capacity()
     if not available:
         print("All sending accounts (Gmail + SMTP) have reached today's daily limit.")
-        # Unclaim everything so tomorrow's first run can pick them up
         for q in queued:
             unclaim_email(q["id"])
         return
@@ -591,15 +617,28 @@ def send_queued():
     sent_count   = 0
     failed_count = 0
     total_accnts = len(available)
-    # Start at a random index to ensure equal distribution over time
     acct_index   = random.randrange(total_accnts) if total_accnts > 0 else 0
+
+    # Track quarantined accounts for this run (transient rate-limit hits)
+    quarantined_accounts = set()
 
     for q in queued:
 
-        # ── Pick account ──────────────────────────────────────────────────
-        # Check if this is an auto-reply with a fixed sender
+        # Skip if we've hit hourly limit mid-run
+        current_hourly = get_hourly_sent_count()
+        if current_hourly >= MAX_EMAILS_PER_HOUR:
+            print(f"[STOPPED] Hourly limit reached mid-run. Unclaiming remaining.")
+            unclaim_email(q["id"])
+            continue
+
+        # ── Pick account ──────────────────────────────────────────────────────
         if q.get("sent_from"):
+            # Fixed sender for auto-replies
             fixed_sender = q["sent_from"]
+            if fixed_sender in quarantined_accounts:
+                print(f"[SKIP] {q['lead_email']} – sender {fixed_sender} is quarantined")
+                unclaim_email(q["id"])
+                continue
             found = next(
                 (a for a in available
                  if a["account"]["email"] == fixed_sender
@@ -607,25 +646,28 @@ def send_queued():
                 None
             )
             if not found:
-                # If the fixed sender is exhausted, we must wait (don't randomize replies)
-                print(f"[SKIP] {q['lead_email']} – fixed sender {fixed_sender} exhausted today")
+                print(f"[SKIP] {q['lead_email']} – fixed sender {fixed_sender} exhausted")
                 unclaim_email(q["id"])
                 continue
             acct_data = found
             account = acct_data["account"]
         else:
             assigned = get_account_for_lead_campaign(q["lead_id"], q["campaign_id"])
-
             if assigned:
+                assigned_email = assigned.get("email") or assigned.get("account_email", "")
+                if assigned_email in quarantined_accounts:
+                    print(f"[SKIP] {q['lead_email']} – assigned account quarantined")
+                    unclaim_email(q["id"])
+                    continue
                 found = next(
                     (a for a in available
-                     if a["account"]["email"] == assigned["email"]
+                     if a["account"]["email"] == assigned_email
                      and a["remaining"] > 0),
                     None
                 )
                 if not found:
-                    print(f"[SKIP] {q['lead_email']} – assigned account exhausted today")
-                    unclaim_email(q["id"])  # release so next day's worker can retry
+                    print(f"[SKIP] {q['lead_email']} – assigned account exhausted")
+                    unclaim_email(q["id"])
                     continue
                 acct_data = found
             else:
@@ -633,35 +675,51 @@ def send_queued():
                     print("All accounts exhausted mid-batch.")
                     unclaim_email(q["id"])
                     break
-                acct_index = acct_index % total_accnts
-                acct_data  = available[acct_index]
+
+                # Find next available non-quarantined account
+                attempts = 0
+                while attempts < total_accnts:
+                    acct_data = available[acct_index]
+                    if acct_data["account"]["email"] not in quarantined_accounts:
+                        break
+                    acct_index = (acct_index + 1) % total_accnts
+                    attempts += 1
+
+                if attempts >= total_accnts:
+                    print(f"[SKIP] {q['lead_email']} – all accounts quarantined")
+                    unclaim_email(q["id"])
+                    continue
+
                 assign_account_to_lead_campaign(
                     q["lead_id"], q["campaign_id"],
                     acct_data["account"]["email"],
                     sender_type=acct_data["account"].get("_type", "gmail"),
                 )
             account = acct_data["account"]
+
         current_count = acct_data["sent_today"]
 
-        # ── Send ──────────────────────────────────────────────────────────
-        try:
-            # Final substitution pass: inject sender name now that we know the account.
-            # This resolves {my name} / {my_name} which can't be filled at queue time.
-            sender_vars   = {
-                "my name": account.get("display_name", ""),
-                "my_name": account.get("display_name", ""),
-            }
-            final_subject = render_email_template(q["subject"], sender_vars)
-            final_body    = render_email_template(q["body"],    sender_vars)
+        # ── Send with retry ────────────────────────────────────────────────────
+        account_type = account.get("_type", "gmail")
+        final_subject = render_email_template(q["subject"], {
+            "my name": account.get("display_name", ""),
+            "my_name": account.get("display_name", ""),
+        })
+        final_body = render_email_template(q["body"], {
+            "my name": account.get("display_name", ""),
+            "my_name": account.get("display_name", ""),
+        })
+        tracked_body = replace_urls_with_tracking(
+            final_body, q["lead_id"], q["campaign_id"], q["id"]
+        )
 
-            tracked_body = replace_urls_with_tracking(
-                final_body, q["lead_id"], q["campaign_id"], q["id"]
-            )
+        ok = False
+        error_code = None
+        retry_count = 0
 
-            # Dispatch to the right sender based on account type
-            account_type = account.get("_type", "gmail")
+        for attempt in range(SEND_RETRY_ATTEMPTS):
             if account_type == "smtp":
-                ok = send_email_via_smtp(
+                ok, error_code = send_email_via_smtp(
                     account     = account,
                     to_email    = q["lead_email"],
                     subject     = final_subject,
@@ -670,64 +728,85 @@ def send_queued():
                     references  = q.get("references")
                 )
             else:
-                ok = send_email_via_gmail(
+                ok, error_code = send_email_via_gmail(
                     account     = account,
                     to_email    = q["lead_email"],
                     subject     = final_subject,
                     html_body   = tracked_body,
                     thread_id   = q.get("thread_id"),
                     in_reply_to = q.get("in_reply_to"),
-                    references  = q.get("references")
+                    references  = q.get("references"),
+                    queue_id    = q["id"],
+                    retry_count = attempt
                 )
 
             if ok:
-                supabase.table("email_queue").update({
-                    "sent_at":    datetime.now(timezone.utc).isoformat(),
-                    "sent_from":  account["email"],
-                    "claimed_at": None,   # clear claim now that it's done
-                }).eq("id", q["id"]).execute()
+                break
 
-                new_count = current_count + 1
-                update_daily_count(account["email"], new_count)
-                increment_hourly_count(1)
+            # Check for non-retryable errors
+            if error_code in ("TOKEN_ERROR", "SMTP_AUTH", "SENDER_REFUSED",
+                               "RATE_LIMIT", "CONNECTION_ERROR", "SMTP_CONNECT"):
+                print(f"[FATAL ERROR] {error_code} — not retrying")
+                break
 
-                acct_data["sent_today"] = new_count
-                acct_data["remaining"]  = DAILY_LIMIT - new_count
+            # Transient failure — retry with exponential backoff
+            if attempt < SEND_RETRY_ATTEMPTS - 1:
+                delay = SEND_RETRY_BASE_DELAY * (2 ** attempt)
+                jitter = random.uniform(0, 1)
+                sleep_time = delay + jitter
+                print(f"[RETRY] {q['lead_email']} attempt {attempt+1} failed ({error_code}), "
+                      f"waiting {sleep_time:.1f}s...")
+                time.sleep(sleep_time)
 
-                if new_count >= DAILY_LIMIT:
-                    # Find and remove from available by email
-                    available = [a for a in available if a["account"]["email"] != account["email"]]
-                    total_accnts = len(available)
-                    if total_accnts == 0:
-                        print("All accounts hit daily limit – stopping batch.")
-                        break
-                    if acct_index >= total_accnts:
-                        acct_index = 0
-                else:
-                    acct_index = (acct_index + 1) % max(total_accnts, 1)
+        # ── Handle result ──────────────────────────────────────────────────────
+        if ok:
+            supabase.table("email_queue").update({
+                "sent_at":    datetime.now(timezone.utc).isoformat(),
+                "sent_from":  account["email"],
+                "claimed_at": None,
+            }).eq("id", q["id"]).execute()
 
-                # Only schedule follow-up if this wasn't an auto-reply (sequence 999)
-                if q["sequence"] < 900:
-                    schedule_followup(q, q["sequence"] + 1, account["email"])
-                sent_count += 1
-                print(f"[SENT] {q['lead_email']} via {account['email']} "
-                      f"[{account.get('_type','gmail').upper()}]  "
-                      f"seq={q['sequence']}")
+            new_count = current_count + 1
+            update_daily_count(account["email"], new_count)
+            increment_hourly_count(1)
 
-                # NOTE: No time.sleep() here.
-                # Rate limiting is enforced by:
-                #   1. MAX_EMAILS_PER_HOUR  — global hourly budget (DB-tracked, now atomic)
-                #   2. MAX_EMAILS_PER_RUN   — per-run cap
-                #   3. scheduled_for        — campaign creation staggers timestamps
-                #                             so future runs pick up the next batch
+            acct_data["sent_today"] = new_count
+            acct_data["remaining"]  = DAILY_LIMIT - new_count
 
+            if new_count >= DAILY_LIMIT:
+                available = [a for a in available if a["account"]["email"] != account["email"]]
+                total_accnts = len(available)
+                if total_accnts == 0:
+                    print("All accounts hit daily limit – stopping batch.")
+                    break
+                if acct_index >= total_accnts:
+                    acct_index = 0
             else:
-                failed_count += 1
-                unclaim_email(q["id"])  # release so next run can retry
                 acct_index = (acct_index + 1) % max(total_accnts, 1)
 
-        except Exception as e:
-            print(f"[ERROR] {q['lead_email']}: {e}")
+            if q["sequence"] < 900:
+                schedule_followup(q, q["sequence"] + 1, account["email"])
+
+            sent_count += 1
+            print(f"[SENT] {q['lead_email']} via {account['email']} "
+                  f"[{account_type.upper()}]  seq={q['sequence']}")
+
+        else:
+            # Log the failure
+            log_send_error(
+                queue_id      = q["id"],
+                account_email = account["email"],
+                to_email      = q["lead_email"],
+                error_code    = error_code or "UNKNOWN",
+                error_message = f"Failed after {SEND_RETRY_ATTEMPTS} attempts",
+                retry_count   = SEND_RETRY_ATTEMPTS
+            )
+
+            # Quarantine on rate limit
+            if error_code == "RATE_LIMIT":
+                quarantined_accounts.add(account["email"])
+                print(f"[QUARANTINE] {account['email']} removed from available accounts for this run")
+
             failed_count += 1
             unclaim_email(q["id"])
             acct_index = (acct_index + 1) % max(total_accnts, 1)

@@ -96,41 +96,6 @@ def render_email_template(template: str, lead_data: dict) -> str:
     return rendered
 
 
-# ── CSV field parsers ─────────────────────────────────────────────────────────
-
-def _parse_last_12m_sales(raw: str) -> str:
-    """
-    Extract the sold count (first integer) from MLS export values like:
-      "39"            →  "39"
-      "(39, 7, 42)"   →  "39"   (Sold / Pending / Expired — use Sold only)
-      "39 sold"       →  "39"
-    Returns empty string if no integer found.
-    """
-    if not raw:
-        return ""
-    m = re.search(r'\d+', raw.strip())
-    return m.group(0) if m else ""
-
-
-def _parse_active_listings(raw: str) -> str:
-    """
-    Extract the first bracketed integer from MLS export values like:
-      "For Sale (3)"                               →  "3"
-      "For Sale (1), For Sale (8), For Sale (2)"   →  "1"  (first entry only)
-      "5"                                          →  "5"  (plain number fallback)
-    Returns empty string if nothing found.
-    """
-    if not raw:
-        return ""
-    # Primary: parenthesised number  e.g.  "For Sale (1)"
-    m = re.search(r'\((\d+)\)', raw)
-    if m:
-        return m.group(1)
-    # Fallback: any plain integer in the string
-    m = re.search(r'\d+', raw.strip())
-    return m.group(0) if m else ""
-
-
 # ── Gmail OAuth constants ─────────────────────────────────────────────────────
 GOOGLE_CLIENT_ID      = os.environ.get('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET  = os.environ.get('GOOGLE_CLIENT_SECRET', '')
@@ -872,6 +837,7 @@ def api_import_leads():
         if 'email' not in [h.lower() for h in reader.fieldnames]:
             return jsonify({"error": "CSV must contain an email column"}), 400
 
+        # Industry-agnostic header aliases
         HEADER_ALIASES = {
             # name
             "name": "name", "first name": "name", "first_name": "name",
@@ -879,33 +845,31 @@ def api_import_leads():
             "contact name": "name", "contact_name": "name",
             # last name
             "lastname": "last name", "last_name": "last name", "surname": "last name",
-            # ai hooks
+            # company / business name (maps to brokerage for backward compat)
+            "company": "company", "company name": "company", "company_name": "company",
+            "business": "company", "business name": "company",
+            # phone
+            "phone": "phone", "telephone": "phone", "phone number": "phone",
+            # service type (HVAC, plumbing, locksmith, etc.)
+            "service": "service", "service type": "service", "service_type": "service",
+            "specialty": "service", "industry": "service",
+            # address
+            "address": "address", "street": "address", "street address": "address",
+            # location
+            "city": "city", "location": "city", "area": "city", "state": "state",
+            "zip": "zip", "zipcode": "zip", "zip code": "zip",
+            # ai hooks / personalization
             "ai hook": "ai hooks", "ai hooks": "ai hooks", "ai_hook": "ai hooks",
-            # last sale
-            "lastsale": "last sale", "last sale": "last sale", "last_sale": "last sale",
-            # open house
-            "openhouse": "open house", "open house": "open house", "open_house": "open house",
-            # ── NEW: last 12 month sales (MLS export variations) ──────────────
-            "last 12 m sales":     "last_12m_sales",
-            "last 12m sales":      "last_12m_sales",
-            "last12msales":        "last_12m_sales",
-            "last 12 month sales": "last_12m_sales",
-            "last12monthsales":    "last_12m_sales",
-            "12m sales":           "last_12m_sales",
-            "12 m sales":          "last_12m_sales",
-            "last_12m_sales":      "last_12m_sales",
-            # ── NEW: active listings (MLS export variations) ──────────────────
-            "active listings":     "active_listings",
-            "activelistings":      "active_listings",
-            "active listing":      "active_listings",
-            "active_listings":     "active_listings",
+            # service area
+            "service area": "service_area", "service_area": "service_area",
+            # custom notes
+            "notes": "notes", "custom notes": "notes", "comments": "notes",
         }
 
+        # Standard fields to extract
         STANDARD_FIELDS = {
-            "email", "name", "last name", "city", "brokerage",
-            "service", "street", "ai hooks", "open house", "last sale",
-            # NEW
-            "last_12m_sales", "active_listings",
+            "email", "name", "last name", "city", "company", "phone",
+            "service", "address", "state", "zip", "ai hooks", "service_area", "notes",
         }
 
         leads_by_email = {}
@@ -928,30 +892,25 @@ def api_import_leads():
             except EmailNotValidError:
                 continue
 
-            # ── Parse structured MLS fields ───────────────────────────────────
-            # last_12m_sales: first integer from e.g. "(39, 7, 42)" → "39"
-            raw_sales = cleaned.get("last_12m_sales", "")
-            cleaned["last_12m_sales"] = _parse_last_12m_sales(raw_sales)
-
-            # active_listings: first bracketed int from e.g. "For Sale (1)" → "1"
-            raw_listings = cleaned.get("active_listings", "")
-            cleaned["active_listings"] = _parse_active_listings(raw_listings)
-
             leads_by_email[email] = {
                 "email":            email,
                 "name":             cleaned.get("name", ""),
                 "last_name":        cleaned.get("last name", ""),
+                "company":          cleaned.get("company", ""),
+                "phone":            cleaned.get("phone", ""),
                 "city":             cleaned.get("city", ""),
-                "brokerage":        cleaned.get("brokerage", ""),
+                "state":            cleaned.get("state", ""),
+                "zip":              cleaned.get("zip", ""),
                 "service":          cleaned.get("service", ""),
-                "street":           cleaned.get("street", ""),
+                "address":          cleaned.get("address", ""),
                 "ai_hooks":         cleaned.get("ai hooks", ""),
-                "open_house":       cleaned.get("open house", ""),
-                "last_sale":        cleaned.get("last sale", ""),
-                # NEW parsed fields
-                "last_12m_sales":   cleaned["last_12m_sales"],
-                "active_listings":  cleaned["active_listings"],
+                "service_area":     cleaned.get("service_area", ""),
+                "notes":            cleaned.get("notes", ""),
                 "list_name":        list_name,
+                # Backward compatibility aliases
+                "brokerage":        cleaned.get("company", ""),
+                "street":           cleaned.get("address", ""),
+                "open_house":       cleaned.get("service_area", ""),
                 "custom_fields":    {k: v for k, v in cleaned.items()
                                      if k not in STANDARD_FIELDS},
             }
@@ -1119,7 +1078,7 @@ def generate_reply_prompt():
         return jsonify({"error": "Missing prompt"}), 400
 
     enhanced = f"""
-Generate a professional real estate agent reply to the following email, and then generate three follow-up emails.
+Generate a professional business owner reply to the following email, and then generate three follow-up emails.
 Format your response exactly as follows:
 
 === REPLY ===
@@ -1149,7 +1108,7 @@ Email to respond to:
             json={
                 "model": "llama-3.1-8b-instant",
                 "messages": [
-                    {"role": "system", "content": "You are a professional real estate agent."},
+                    {"role": "system", "content": "You are a professional home services business owner."},
                     {"role": "user",   "content": enhanced}
                 ],
                 "temperature": 0.7, "max_tokens": 1024, "top_p": 0.8
@@ -1563,20 +1522,20 @@ def api_manual_reply():
 import time as _time
 
 _TEST_EVENTS = {
-    'pilot_created':     ('🏠 Pilot Created',         'john.smith@kw.com sent a listing URL → 123 Maple St Denver CO 80203\nSubject: Re: Your listing',         'high',    'house,rotating_light'),
-    'yes_no_url':        ('📋 Agent Interested',       'sarah.jones@realty.com is interested but hasn\'t shared a URL yet.\nSubject: Re: Free pilot offer',        'high',    'memo,rotating_light'),
-    'forwarded_lead':    ('📨 Forwarded Lead',         'mike.broker@compass.com forwarded a buyer lead.\nSubject: Fwd: Interested in your listing',                'high',    'inbox_tray,rotating_light'),
-    'negative':          ('⚠️ Negative Objection',    'angry.agent@gmail.com\n"Stop emailing me, my listing is already under contract and your info is wrong!"',  'high',    'warning'),
+    'pilot_created':     ('🏠 Pilot Created',         'john.smith@acmeplumbing.com sent a service URL → 123 Main St Denver CO 80203\nSubject: Re: Your service area',         'high',    'house,rotating_light'),
+    'yes_no_url':        ('📋 Business Interested',   'sarah.jones@heatingpro.com is interested but hasn\'t shared a URL yet.\nSubject: Re: Free pilot offer',        'high',    'memo,rotating_light'),
+    'forwarded_lead':    ('📨 Forwarded Lead',         'mike.tech@hvachub.com forwarded a service lead.\nSubject: Fwd: Interested in your services',                'high',    'inbox_tray,rotating_light'),
+    'negative':          ('⚠️ Negative Objection',    'angry.contractor@gmail.com\n"Stop emailing me, I already have a service contract and your info is wrong!"',  'high',    'warning'),
     'auto_reply_failed': ('❌ Auto-Reply Failed',      'Could not send auto-reply to broken@domain.com\nIntent: YES_NO_URL\nAccount: outreach@replyzeai.com',      'high',    'x,warning'),
-    'asks_price':        ('💰 Pricing Question',       'curious.agent@kw.com asked about pricing.\nSubject: How much does this cost?',                             'default', 'moneybag'),
-    'asks_details':      ('❓ Details Question',       'tech.savvy@compass.com asked how the system works.\nSubject: How does the setup work?',                    'default', 'question'),
+    'asks_price':        ('💰 Pricing Question',       'curious.tech@hvacpro.com asked about pricing.\nSubject: How much does this cost?',                             'default', 'moneybag'),
+    'asks_details':      ('❓ Details Question',       'tech.savvy@plumbingco.com asked how the system works.\nSubject: How does the setup work?',                    'default', 'question'),
     'unsubscribe':       ('🚫 Unsubscribe',            'opt.out@gmail.com opted out and was marked do-not-contact.',                                               'low',     'no_entry'),
     'run_complete':      ('📬 Reply Run Complete',     '5 message(s) processed across 2 account(s).',                                                              'low',     'email'),
     'campaign_queued':   ('📣 Campaign Queued',        '"Spring Outreach 2026" → 342 emails queued immediately.',                                                  'default', 'loudspeaker'),
     'manual_reply_sent': ('📤 Manual Reply Sent',      'To: vip.lead@gmail.com\nSubject: Following up on your question\nFrom: outreach@replyzeai.com',             'low',     'outbox_tray'),
     'ticket_resolved':   ('✅ Ticket Resolved',        'Ticket #42 was resolved by admin.',                                                                        'low',     'white_check_mark'),
     'batch_done':        ('📧 15 Emails Sent',         'Batch complete — 15 email(s) delivered successfully.',                                                     'low',     'email'),
-    'send_limit':        ('⚠️ Daily Limit Reached',   'All SMTP accounts have hit their 50-email daily limit. No emails sent until tomorrow.',                    'high',    'warning'),
+    'send_limit':        ('⚠️ Daily Limit Reached',   'All Gmail accounts have hit their daily limit. No emails sent until tomorrow.',                    'high',    'warning'),
 }
 _HIGH_PRIORITY_EVENTS = {k for k, v in _TEST_EVENTS.items() if v[2] == 'high'}
 

@@ -16,7 +16,7 @@ def callAIML_from_flask(prompt: str) -> str:
             json={
                 "model": model.strip(),
                 "messages": [
-                    {"role": "system", "content": "You are a professional real estate agent."},
+                    {"role": "system", "content": "You are a professional home services business owner."},
                     {"role": "user",   "content": prompt}
                 ],
                 "temperature": 0.7,
