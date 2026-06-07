@@ -1,9 +1,8 @@
-<!-- templates/admin.html -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>ReplyzeAI — Cold Outreach System</title>
+  <title>Replyze — Cold Outreach System</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -42,9 +41,7 @@
        RESET + BASE
     ═══════════════════════════════════════════════ */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     html { scroll-behavior: smooth; }
-
     body {
       font-family: var(--font-mono);
       background: var(--bg0);
@@ -53,7 +50,6 @@
       overflow-x: hidden;
     }
 
-    /* animated grid background */
     body::before {
       content: '';
       position: fixed;
@@ -66,7 +62,6 @@
       z-index: 0;
     }
 
-    /* scanline shimmer */
     body::after {
       content: '';
       position: fixed;
@@ -74,12 +69,7 @@
       left: 0;
       width: 100%;
       height: 200%;
-      background: linear-gradient(
-        to bottom,
-        transparent 0%,
-        rgba(0,255,157,0.025) 50%,
-        transparent 100%
-      );
+      background: linear-gradient(to bottom, transparent 0%, rgba(0,255,157,0.025) 50%, transparent 100%);
       animation: scanline 8s linear infinite;
       pointer-events: none;
       z-index: 0;
@@ -196,11 +186,7 @@
       box-shadow: inset 3px 0 0 var(--neon);
     }
 
-    .nav-icon {
-      font-size: 16px;
-      width: 20px;
-      text-align: center;
-    }
+    .nav-icon { font-size: 16px; width: 20px; text-align: center; }
 
     .sidebar-footer {
       margin-top: auto;
@@ -212,12 +198,7 @@
     }
 
     /* ── MAIN ── */
-    .main {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-    }
+    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
     .topbar {
       padding: 18px 32px;
@@ -296,9 +277,7 @@
       opacity: 0.4;
     }
 
-    .card:hover {
-      border-color: rgba(0,255,157,0.22);
-    }
+    .card:hover { border-color: rgba(0,255,157,0.22); }
 
     .card-title {
       font-family: var(--font-head);
@@ -324,9 +303,7 @@
     /* ═══════════════════════════════════════════════
        FORMS
     ═══════════════════════════════════════════════ */
-    .form-group {
-      margin-bottom: 14px;
-    }
+    .form-group { margin-bottom: 14px; }
 
     label.field-label {
       display: block;
@@ -364,15 +341,8 @@
       background: rgba(0,255,157,0.03);
     }
 
-    input[type="file"] {
-      cursor: pointer;
-      color: var(--text-dim);
-    }
-
-    select option {
-      background: var(--bg2);
-      color: var(--text);
-    }
+    input[type="file"] { cursor: pointer; color: var(--text-dim); }
+    select option { background: var(--bg2); color: var(--text); }
 
     input[type="checkbox"] {
       width: auto;
@@ -414,7 +384,6 @@
       color: #030310;
       box-shadow: 0 0 14px rgba(0,255,157,0.3);
     }
-
     .btn-primary:hover {
       background: #00ffb0;
       box-shadow: 0 0 24px rgba(0,255,157,0.55);
@@ -426,7 +395,6 @@
       color: var(--neon);
       border: 1px solid rgba(0,255,157,0.35);
     }
-
     .btn-outline:hover {
       background: rgba(0,255,157,0.08);
       border-color: var(--neon);
@@ -438,33 +406,17 @@
       color: var(--text-dim);
       border: 1px solid rgba(255,255,255,0.07);
     }
-
-    .btn-ghost:hover {
-      background: rgba(255,255,255,0.08);
-      color: var(--text);
-    }
+    .btn-ghost:hover { background: rgba(255,255,255,0.08); color: var(--text); }
 
     .btn-danger {
       background: transparent;
       color: var(--pink);
       border: 1px solid rgba(255,45,107,0.3);
     }
+    .btn-danger:hover { background: rgba(255,45,107,0.1); border-color: var(--pink); }
 
-    .btn-danger:hover {
-      background: rgba(255,45,107,0.1);
-      border-color: var(--pink);
-    }
-
-    .btn-sm {
-      padding: 5px 10px;
-      font-size: 10px;
-    }
-
-    .btn-full {
-      width: 100%;
-      justify-content: center;
-      margin-top: 8px;
-    }
+    .btn-sm { padding: 5px 10px; font-size: 10px; }
+    .btn-full { width: 100%; justify-content: center; margin-top: 8px; }
 
     /* ═══════════════════════════════════════════════
        TABLES
@@ -475,15 +427,8 @@
       border: 1px solid var(--border);
     }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-
-    thead {
-      background: rgba(0,255,157,0.04);
-    }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead { background: rgba(0,255,157,0.04); }
 
     th {
       padding: 12px 16px;
@@ -506,14 +451,8 @@
     }
 
     tr:last-child td { border-bottom: none; }
-
-    tbody tr {
-      transition: background var(--transition);
-    }
-
-    tbody tr:hover {
-      background: rgba(0,255,157,0.03);
-    }
+    tbody tr { transition: background var(--transition); }
+    tbody tr:hover { background: rgba(0,255,157,0.03); }
 
     /* ═══════════════════════════════════════════════
        STATUS BADGES
@@ -531,48 +470,45 @@
       text-transform: uppercase;
     }
 
-    .badge-green {
-      background: rgba(0,255,157,0.1);
-      color: var(--neon);
-      border: 1px solid rgba(0,255,157,0.25);
-    }
+    .badge-green  { background: rgba(0,255,157,0.1);   color: var(--neon);  border: 1px solid rgba(0,255,157,0.25); }
+    .badge-amber  { background: rgba(255,176,32,0.1);  color: var(--amber); border: 1px solid rgba(255,176,32,0.25); }
+    .badge-red    { background: rgba(255,45,107,0.1);  color: var(--pink);  border: 1px solid rgba(255,45,107,0.25); }
+    .badge-cyan   { background: rgba(0,212,255,0.1);   color: var(--cyan);  border: 1px solid rgba(0,212,255,0.25); }
 
-    .badge-amber {
-      background: rgba(255,176,32,0.1);
-      color: var(--amber);
-      border: 1px solid rgba(255,176,32,0.25);
-    }
-
-    .badge-red {
-      background: rgba(255,45,107,0.1);
-      color: var(--pink);
-      border: 1px solid rgba(255,45,107,0.25);
-    }
-
-    .badge-cyan {
-      background: rgba(0,212,255,0.1);
-      color: var(--cyan);
-      border: 1px solid rgba(0,212,255,0.25);
-    }
+    /* intent / pilot status badges */
+    .badge-YES_WITH_URL   { background:rgba(0,255,157,.15);   color:#00ff9d; border:1px solid rgba(0,255,157,.3); }
+    .badge-YES_NO_URL     { background:rgba(0,212,255,.15);   color:#00d4ff; border:1px solid rgba(0,212,255,.3); }
+    .badge-CRM_REPLY      { background:rgba(168,85,247,.18);  color:#c084fc; border:1px solid rgba(168,85,247,.35); }
+    .badge-YES_CRM_PENDING    { background:rgba(0,212,255,.15);  color:#00d4ff; border:1px solid rgba(0,212,255,.3); }
+    .badge-CRM_REPLY_RECEIVED { background:rgba(168,85,247,.18); color:#c084fc; border:1px solid rgba(168,85,247,.35); }
+    .badge-FORWARDED_LEAD { background:rgba(255,176,32,.15);  color:#ffb020; border:1px solid rgba(255,176,32,.3); }
+    .badge-NEGATIVE_OBJECTION { background:rgba(239,68,68,.15); color:#f87171; border:1px solid rgba(239,68,68,.3); }
+    .badge-ASKS_PRICE     { background:rgba(124,58,237,.18);  color:#a78bfa; border:1px solid rgba(124,58,237,.3); }
+    .badge-ASKS_DETAILS   { background:rgba(59,130,246,.18);  color:#93c5fd; border:1px solid rgba(59,130,246,.3); }
+    .badge-PASS_UNSUB     { background:rgba(255,45,107,.18);  color:#ff2d6b; border:1px solid rgba(255,45,107,.3); }
+    .badge-QUESTION_OTHER { background:rgba(107,114,128,.2);  color:#9ca3af; border:1px solid rgba(107,114,128,.3); }
+    .badge-UNKNOWN        { background:rgba(107,114,128,.12); color:#6b7280; border:1px solid rgba(107,114,128,.2); }
+    .badge-pending_setup  { background:rgba(255,176,32,.15);  color:#ffb020; border:1px solid rgba(255,176,32,.3); }
+    .badge-active         { background:rgba(0,255,157,.15);   color:#00ff9d; border:1px solid rgba(0,255,157,.3); }
+    .badge-running        { background:rgba(0,212,255,.15);   color:#00d4ff; border:1px solid rgba(0,212,255,.3); }
+    .badge-completed      { background:rgba(124,58,237,.18);  color:#a78bfa; border:1px solid rgba(124,58,237,.3); }
+    .badge-reported       { background:rgba(59,130,246,.18);  color:#93c5fd; border:1px solid rgba(59,130,246,.3); }
+    .badge-converted      { background:rgba(16,185,129,.2);   color:#6ee7b7; border:1px solid rgba(16,185,129,.3); }
+    .badge-open           { background:rgba(255,176,32,.15);  color:#ffb020; border:1px solid rgba(255,176,32,.3); }
+    .badge-resolved       { background:rgba(0,255,157,.1);    color:#00ff9d; border:1px solid rgba(0,255,157,.25); }
+    .badge-spam           { background:rgba(255,45,107,.1);   color:#ff2d6b; border:1px solid rgba(255,45,107,.25); }
 
     /* ═══════════════════════════════════════════════
        PROGRESS BARS
     ═══════════════════════════════════════════════ */
     .progress-bar {
-      width: 100%;
-      height: 4px;
+      width: 100%; height: 4px;
       background: rgba(255,255,255,0.06);
       border-radius: 2px;
       overflow: hidden;
       margin-top: 6px;
     }
-
-    .progress-fill {
-      height: 100%;
-      border-radius: 2px;
-      transition: width 0.5s ease;
-    }
-
+    .progress-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
     .progress-fill.good   { background: var(--neon);  box-shadow: 0 0 8px var(--neon); }
     .progress-fill.warn   { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
     .progress-fill.danger { background: var(--pink);  box-shadow: 0 0 8px var(--pink); }
@@ -587,7 +523,6 @@
       margin-top: 12px;
       border-left: 3px solid;
     }
-
     .alert-success { background: rgba(0,255,157,0.07);  border-color: var(--neon);  color: var(--neon); }
     .alert-error   { background: rgba(255,45,107,0.07); border-color: var(--pink);  color: var(--pink); }
     .alert-info    { background: rgba(0,212,255,0.07);  border-color: var(--cyan);  color: var(--cyan); }
@@ -598,7 +533,7 @@
     ═══════════════════════════════════════════════ */
     .stat-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
       gap: 16px;
       margin-bottom: 24px;
     }
@@ -611,7 +546,6 @@
       position: relative;
       overflow: hidden;
     }
-
     .stat-card::after {
       content: '';
       position: absolute;
@@ -629,7 +563,6 @@
       color: var(--text-mute);
       margin-bottom: 10px;
     }
-
     .stat-value {
       font-family: var(--font-head);
       font-size: 32px;
@@ -638,12 +571,7 @@
       line-height: 1;
       text-shadow: 0 0 20px rgba(0,255,157,0.4);
     }
-
-    .stat-sub {
-      font-size: 11px;
-      color: var(--text-mute);
-      margin-top: 4px;
-    }
+    .stat-sub { font-size: 11px; color: var(--text-mute); margin-top: 4px; }
 
     /* ═══════════════════════════════════════════════
        SPINTAX HELPER
@@ -657,14 +585,7 @@
       font-size: 12px;
       color: var(--text-dim);
     }
-
-    .spintax-helper strong {
-      color: var(--cyan);
-      font-family: var(--font-head);
-      font-size: 11px;
-      letter-spacing: 0.1em;
-    }
-
+    .spintax-helper strong { color: var(--cyan); font-family: var(--font-head); font-size: 11px; letter-spacing: 0.1em; }
     .spintax-example {
       font-family: var(--font-mono);
       background: rgba(0,0,0,0.3);
@@ -688,14 +609,12 @@
       margin-bottom: 12px;
       background: rgba(0,0,0,0.2);
     }
-
     .followup-block .followup-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 12px;
     }
-
     .followup-block .followup-title {
       font-family: var(--font-head);
       font-size: 11px;
@@ -718,19 +637,8 @@
       margin-bottom: 8px;
       background: rgba(0,0,0,0.2);
     }
-
-    .run-id {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--text-mute);
-      min-width: 80px;
-    }
-
-    .run-time {
-      font-size: 12px;
-      color: var(--text-dim);
-      flex: 1;
-    }
+    .run-id   { font-family: var(--font-mono); font-size: 11px; color: var(--text-mute); min-width: 80px; }
+    .run-time { font-size: 12px; color: var(--text-dim); flex: 1; }
 
     /* ═══════════════════════════════════════════════
        ACCOUNT STATUS CARD
@@ -745,77 +653,28 @@
       align-items: center;
       gap: 16px;
     }
-
-    .account-indicator {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-
+    .account-indicator { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     .account-indicator.good   { background: var(--neon);  box-shadow: 0 0 8px var(--neon); }
     .account-indicator.warn   { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
     .account-indicator.danger { background: var(--pink);  box-shadow: 0 0 8px var(--pink); }
-
     .account-info { flex: 1; min-width: 0; }
-    .account-email {
-      font-size: 13px;
-      color: var(--text);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .account-name {
-      font-size: 11px;
-      color: var(--text-dim);
-    }
-
-    .account-stats {
-      text-align: right;
-      flex-shrink: 0;
-    }
-
-    .account-count {
-      font-family: var(--font-head);
-      font-size: 18px;
-      font-weight: 800;
-      color: var(--text);
-    }
-
-    .account-limit {
-      font-size: 10px;
-      color: var(--text-mute);
-    }
-
-    .account-bar-wrap { flex-shrink: 0; width: 120px; }
+    .account-email { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .account-name  { font-size: 11px; color: var(--text-dim); }
+    .account-stats { text-align: right; flex-shrink: 0; }
+    .account-count { font-family: var(--font-head); font-size: 18px; font-weight: 800; color: var(--text); }
+    .account-limit { font-size: 10px; color: var(--text-mute); }
 
     /* ═══════════════════════════════════════════════
        EMPTY STATE
     ═══════════════════════════════════════════════ */
-    .empty-state {
-      text-align: center;
-      padding: 40px 20px;
-      color: var(--text-mute);
-    }
-
-    .empty-state-icon {
-      font-size: 36px;
-      margin-bottom: 12px;
-      opacity: 0.4;
-    }
-
-    .empty-state p {
-      font-size: 13px;
-    }
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--text-mute); }
+    .empty-state-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.4; }
+    .empty-state p { font-size: 13px; }
 
     /* ═══════════════════════════════════════════════
        PAGE HEADER
     ═══════════════════════════════════════════════ */
-    .page-header {
-      margin-bottom: 28px;
-    }
-
+    .page-header { margin-bottom: 28px; }
     .page-header h2 {
       font-family: var(--font-head);
       font-size: 22px;
@@ -824,21 +683,13 @@
       text-transform: uppercase;
       color: var(--text);
     }
-
-    .page-header p {
-      font-size: 12px;
-      color: var(--text-dim);
-      margin-top: 6px;
-    }
+    .page-header p { font-size: 12px; color: var(--text-dim); margin-top: 6px; }
 
     /* ═══════════════════════════════════════════════
        GRID UTILITIES
     ═══════════════════════════════════════════════ */
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-
-    @media (max-width: 860px) {
-      .grid-2 { grid-template-columns: 1fr; }
-    }
+    @media (max-width: 860px) { .grid-2 { grid-template-columns: 1fr; } }
 
     /* ═══════════════════════════════════════════════
        SCROLLBAR
@@ -861,15 +712,11 @@
       border-radius: var(--radius);
       height: 14px;
     }
-
     @keyframes shimmer {
       0%   { background-position: 200% 0; }
       100% { background-position: -200% 0; }
     }
 
-    /* ═══════════════════════════════════════════════
-       INLINE CODE
-    ═══════════════════════════════════════════════ */
     code {
       font-family: var(--font-mono);
       background: rgba(0,255,157,0.07);
@@ -878,61 +725,224 @@
       border-radius: 3px;
       font-size: 12px;
     }
+
+    /* ═══════════════════════════════════════════════
+       GOOGLE OAUTH BUTTON
+    ═══════════════════════════════════════════════ */
+    .google-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 24px;
+      background: #fff;
+      color: #3c4043;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      font-family: 'Google Sans', var(--font-head), sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      text-decoration: none;
+      cursor: pointer;
+      transition: box-shadow 0.18s ease, background 0.18s ease;
+      width: 100%;
+      max-width: 300px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+    }
+    .google-btn:hover { background: #f8f9fa; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
+
+    /* ═══════════════════════════════════════════════
+       REPLIES & PILOTS — sub-tab bar
+    ═══════════════════════════════════════════════ */
+    .reply-tab-bar {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    .reply-tab-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 7px 16px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-family: var(--font-head);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      transition: var(--transition);
+    }
+    .reply-tab-btn:hover,
+    .reply-tab-btn.active {
+      border-color: var(--neon);
+      color: var(--neon);
+      background: rgba(0,255,157,0.07);
+    }
+    .reply-tab-panel { display: none; }
+    .reply-tab-panel.active { display: block; }
+
+    /* quick-filter selects inside replies tab */
+    .filter-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .filter-row select {
+      width: auto;
+      padding: 7px 12px;
+      font-size: 12px;
+    }
+
+    /* manual reply form */
+    .manual-form {
+      max-width: 620px;
+    }
+    .manual-form label.field-label { font-size: 10px; }
+    .tmpl-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+    .tmpl-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 4px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: var(--font-head);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      transition: var(--transition);
+    }
+    .tmpl-btn:hover { border-color: var(--neon); color: var(--neon); }
+
+    /* ── Nav badge (YES awaiting setup count) ── */
+    .nav-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 9px;
+      background: var(--pink);
+      color: #fff;
+      font-family: var(--font-head);
+      font-size: 10px;
+      font-weight: 800;
+      margin-left: auto;
+      box-shadow: 0 0 8px rgba(255,45,107,0.5);
+      animation: blink 2s ease-in-out infinite;
+    }
+
+    /* Amber row highlight — contractor said YES but hasn't sent service url */
+    tr.awaiting-setup td { background: rgba(255,176,32,0.06); }
+    tr.awaiting-setup td:first-child { border-left: 3px solid var(--amber); }
+
+    /* Badge for YES_AWAITING_SETUP intent */
+    .badge-YES_AWAITING_SETUP { background:rgba(255,176,32,.2); color:#ffb020; border:1px solid rgba(255,176,32,.4); }
+
+    /* ── Reply conversation preview bubbles ── */
+    .reply-preview-cell { max-width: 260px; }
+    .reply-bubble {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      font-size: 11px;
+      line-height: 1.4;
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .reply-bubble.their-bubble {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--text-dim);
+    }
+    .reply-bubble.our-bubble {
+      background: rgba(0,255,163,0.06);
+      border: 1px solid rgba(0,255,163,0.15);
+      color: rgba(0,255,163,0.85);
+    }
+    .reply-bubble.expanded { -webkit-line-clamp: unset; }
+    .reply-bubble:hover { opacity: 0.85; }
+    .reasoning-tag {
+      font-size: 10px;
+      color: var(--text-mute);
+      font-style: italic;
+      margin-top: 3px;
+      display: block;
+    }
   </style>
 </head>
 <body>
 
 <div class="layout">
 
-  <!-- ══════════ SIDEBAR ══════════ -->
   <nav class="sidebar">
     <div class="sidebar-logo">
-      <div class="logo-mark">ReplyzeAI</div>
+      <div class="logo-mark">Replyze</div>
       <div class="logo-sub">Cold Outreach System</div>
     </div>
 
     <div class="nav-section">
       <div class="nav-section-label">Outreach</div>
-      <div class="nav-item active" onclick="showTab('import')"     id="nav-import">
+      <div class="nav-item active" onclick="showTab('import')" id="nav-import">
         <span class="nav-icon">📥</span> Import Leads
       </div>
-      <div class="nav-item" onclick="showTab('campaigns')"  id="nav-campaigns">
+      <div class="nav-item" onclick="showTab('campaigns')" id="nav-campaigns">
         <span class="nav-icon">🚀</span> Campaigns
       </div>
-      <div class="nav-item" onclick="showTab('templates')"  id="nav-templates">
+      <div class="nav-item" onclick="showTab('templates')" id="nav-templates">
         <span class="nav-icon">📝</span> Templates
       </div>
     </div>
 
     <div class="nav-section">
       <div class="nav-section-label">Insights</div>
-      <div class="nav-item" onclick="showTab('analytics')"  id="nav-analytics">
+      <div class="nav-item" onclick="showTab('analytics')" id="nav-analytics">
         <span class="nav-icon">📊</span> Analytics
       </div>
-      <div class="nav-item" onclick="showTab('responded')"  id="nav-responded">
+      <div class="nav-item" onclick="showTab('diagnosis')" id="nav-diagnosis">
+        <span class="nav-icon">🔍</span> Campaign AI Diagnosis
+      </div>
+      <div class="nav-item" onclick="showTab('responded')" id="nav-responded">
         <span class="nav-icon">💬</span> Responded
+      </div>
+      <div class="nav-item" onclick="showTab('replies')" id="nav-replies">
+        <span class="nav-icon">↩</span> Replies &amp; Pilots
+        <span class="nav-badge" id="awaiting-setup-badge" style="display:none">0</span>
       </div>
     </div>
 
     <div class="nav-section">
       <div class="nav-section-label">System</div>
-      <div class="nav-item" onclick="showTab('smtp')"       id="nav-smtp">
-        <span class="nav-icon">📡</span> SMTP Accounts
+      <div class="nav-item" onclick="showTab('gmail')" id="nav-gmail">
+        <span class="nav-icon">📧</span> Email Accounts
       </div>
-      <div class="nav-item" onclick="showTab('status')"     id="nav-status">
+      <div class="nav-item" onclick="showTab('status')" id="nav-status">
         <span class="nav-icon">⚡</span> Account Status
       </div>
-      <div class="nav-item" onclick="showTab('workflow')"   id="nav-workflow">
+      <div class="nav-item" onclick="showTab('workflow')" id="nav-workflow">
         <span class="nav-icon">⚙️</span> Workflow
+      </div>
+      <div class="nav-item" onclick="showTab('notifications')" id="nav-notifications">
+        <span class="nav-icon">🔔</span> Notifications
       </div>
     </div>
 
     <div class="sidebar-footer">
-      v2.0 — spintax enabled
+      v4.1 — Gmail API + SMTP/IMAP + Auto-Reply
     </div>
   </nav>
 
-  <!-- ══════════ MAIN ══════════ -->
   <div class="main">
     <div class="topbar">
       <div class="topbar-title" id="topbarTitle">Import Leads</div>
@@ -944,11 +954,10 @@
 
     <div class="content">
 
-      <!-- ─────────────────── IMPORT ─────────────────── -->
       <div id="import" class="tab active">
         <div class="page-header">
           <h2>Import Leads</h2>
-          <p>Upload a CSV file to create a new lead list. Required column: <code>email</code>. Optional: name, city, brokerage, service, etc.</p>
+          <p>Upload a CSV file to create a new lead list. Required column: <code>email</code>. Optional: name, city, company, service, etc.</p>
         </div>
 
         <div class="grid-2">
@@ -960,7 +969,7 @@
             </div>
             <div class="form-group">
               <label class="field-label">List Name</label>
-              <input type="text" id="listName" placeholder="e.g. NYC Real Estate Q1">
+              <input type="text" id="listName" placeholder="e.g. Miami Plumbers Q1">
             </div>
             <button class="btn btn-primary btn-full" onclick="importLeads()">
               ⬆ Import Leads
@@ -978,7 +987,6 @@
         </div>
       </div>
 
-      <!-- ─────────────────── CAMPAIGNS ─────────────────── -->
       <div id="campaigns" class="tab">
         <div class="page-header">
           <h2>Campaigns</h2>
@@ -989,15 +997,15 @@
           <div class="card-title">Create New Campaign</div>
 
           <div class="spintax-helper">
-            <strong>⚡ Spintax Engine Active</strong> — use <code>{{option A|option B|option C}}</code> in subjects &amp; bodies.<br>
+            <strong>⚡ Spintax Engine Active</strong> — use <code>{% raw %}{{Hi|Hello|Hey}}{% endraw %} {name}, {% raw %}{{I noticed|I saw|I came across}}{% endraw %} your work at {company}...</code> in subjects &amp; bodies.<br>
             Each recipient receives a randomly picked permutation — unlimited unique messages.
-            <div class="spintax-example">{{Hi|Hello|Hey}} {name}, {{I noticed|I saw|I came across}} your work at {brokerage}...</div>
+            <div class="spintax-example">{% raw %}{{Hi|Hello|Hey}}{% endraw %} {name}, {% raw %}{{I noticed|I saw|I came across}}{% endraw %} your work at {company}...</div>
           </div>
 
           <div class="grid-2">
             <div class="form-group">
               <label class="field-label">Campaign Name</label>
-              <input id="campaignName" type="text" placeholder="Q1 Real Estate Outreach">
+              <input id="campaignName" type="text" placeholder="Emergency HVAC Outreach">
             </div>
             <div class="form-group">
               <label class="field-label">Lead List</label>
@@ -1009,12 +1017,12 @@
 
           <div class="form-group">
             <label class="field-label">Email Subject — spintax supported</label>
-            <input id="campaignSubject" type="text" placeholder="{{Quick question|Reaching out|Connecting}} about {brokerage}">
+            <input id="campaignSubject" type="text" placeholder="{ {Quick question|Reaching out} } for {name} at {company}">
           </div>
 
           <div class="form-group">
             <label class="field-label">Email Body — HTML + spintax supported</label>
-            <textarea id="campaignBody" rows="8" placeholder="{{Hi|Hello|Hey}} {name},&#10;&#10;{{I noticed you're with|I came across your profile at}} {brokerage} in {city}..."></textarea>
+            <textarea id="campaignBody" rows="8" placeholder="{ {Hi|Hello|Hey} } {name},&#10;&#10;{ {I noticed|I came across} } you're with {company} in {city}..."></textarea>
           </div>
 
           <div style="margin-bottom:16px">
@@ -1034,14 +1042,32 @@
                   </div>
                   <div class="form-group">
                     <label class="field-label">Subject — spintax ok</label>
-                    <input class="followup-subject" type="text" placeholder="{{Following up|Checking in|Quick follow-up}}">
+                    <input class="followup-subject" type="text" placeholder="{ {Following up|Checking in|Quick follow-up} }">
                   </div>
                 </div>
                 <div class="form-group">
                   <label class="field-label">Body — spintax ok</label>
-                  <textarea class="followup-body" rows="4" placeholder="{{Just wanted to|Wanted to}} follow up on my previous message..."></textarea>
+                  <textarea class="followup-body" rows="4" placeholder="{ {Just wanted to|Wanted to} } follow up on my previous message..."></textarea>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:16px;border-color:rgba(0,212,255,0.2);background:rgba(0,212,255,0.03)">
+            <div class="card-title" style="color:var(--cyan);margin-bottom:14px">⏱ Send Throttle</div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label class="field-label">Delay Between Emails (seconds)</label>
+                <input id="sendDelay" type="number" value="30" min="0" max="3600" placeholder="30">
+              </div>
+              <div class="form-group">
+                <label class="field-label">Jitter ± (seconds, optional)</label>
+                <input id="sendJitter" type="number" value="10" min="0" max="300" placeholder="10">
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--text-mute);line-height:1.7;margin-top:-4px">
+              Each email is staggered by <strong style="color:var(--cyan)">delay ± jitter</strong> seconds from the previous send time.
+              e.g. 30s delay + 10s jitter → sends spaced 20–40s apart. Set delay to <code>0</code> to send as fast as possible.
             </div>
           </div>
 
@@ -1065,7 +1091,6 @@
         </div>
       </div>
 
-      <!-- ─────────────────── TEMPLATES ─────────────────── -->
       <div id="templates" class="tab">
         <div class="page-header">
           <h2>Templates</h2>
@@ -1076,15 +1101,13 @@
           <div class="card-title">Variable Reference</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px">
             <code>{name}</code><code>{last_name}</code><code>{email}</code>
-            <code>{city}</code><code>{brokerage}</code><code>{service}</code>
-            <code>{street}</code><code>{ai_hooks}</code><code>{open_house}</code>
-            <code>{last_sale}</code>
+            <code>{city}</code><code>{company}</code><code>{service}</code>
+            <code>{street}</code><code>{ai_hooks}</code>
           </div>
           <div id="templatesContainer"></div>
         </div>
       </div>
 
-      <!-- ─────────────────── ANALYTICS ─────────────────── -->
       <div id="analytics" class="tab">
         <div class="page-header">
           <h2>Analytics</h2>
@@ -1102,10 +1125,7 @@
           <div class="table-wrap" id="clickAnalyticsWrap" style="margin-top:16px">
             <table>
               <thead><tr>
-                <th>Lead Email</th>
-                <th>URL Clicked</th>
-                <th>Time</th>
-                <th>AI Demo</th>
+                <th>Lead Email</th><th>URL Clicked</th><th>Time</th><th>AI Demo</th>
               </tr></thead>
               <tbody id="clickData">
                 <tr><td colspan="4" style="color:var(--text-mute);text-align:center;padding:24px">Select a campaign to view clicks</td></tr>
@@ -1115,87 +1135,18 @@
         </div>
       </div>
 
-      <!-- ─────────────────── SMTP ─────────────────── -->
-      <div id="smtp" class="tab">
+      <div id="diagnosis" class="tab">
         <div class="page-header">
-          <h2>SMTP Accounts</h2>
-          <p>Add sending accounts. Each account is limited to 100 emails/day. Emails rotate automatically.</p>
+          <h2>Campaign AI Diagnosis</h2>
+          <p>Per-campaign delivery &amp; engagement breakdown — click <strong>Analyze</strong> to have the AI diagnose what went wrong and suggest fixes.</p>
         </div>
 
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-title">Add Account</div>
-            <div class="form-group">
-              <label class="field-label">Email Address</label>
-              <input type="email" id="smtpEmail" placeholder="sender@yourdomain.com">
-            </div>
-            <div class="form-group">
-              <label class="field-label">Display Name</label>
-              <input type="text" id="smtpDisplayName" placeholder="John Smith">
-            </div>
-            <div class="form-group">
-              <label class="field-label">SMTP Host</label>
-              <input type="text" id="smtpHost" placeholder="smtp.gmail.com">
-            </div>
-            <div class="grid-2">
-              <div class="form-group">
-                <label class="field-label">SMTP Port</label>
-                <input type="number" id="smtpPort" value="587">
-              </div>
-              <div class="form-group">
-                <label class="field-label">Username</label>
-                <input type="text" id="smtpUsername" placeholder="your@email.com">
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="field-label">Password / App Password</label>
-              <input type="password" id="smtpPassword" placeholder="••••••••••••">
-            </div>
-            <div class="grid-2">
-              <div class="form-group">
-                <label class="field-label">IMAP Host (optional)</label>
-                <input type="text" id="imapHost" placeholder="imap.gmail.com">
-              </div>
-              <div class="form-group">
-                <label class="field-label">IMAP Port</label>
-                <input type="number" id="imapPort" value="993">
-              </div>
-            </div>
-            <button class="btn btn-primary btn-full" onclick="addSmtpAccount()">
-              📡 Add SMTP Account
-            </button>
-            <div id="smtpStatus"></div>
-          </div>
-
-          <div class="card">
-            <div class="card-title">Configured Accounts</div>
-            <div id="smtpAccountsContainer">
-              <div class="skeleton" style="margin-bottom:8px"></div>
-              <div class="skeleton" style="width:65%"></div>
-            </div>
-          </div>
+        <div id="diag-campaign-list">
+          <div class="skeleton" style="margin-bottom:12px;height:60px"></div>
+          <div class="skeleton" style="height:60px;width:80%"></div>
         </div>
       </div>
 
-      <!-- ─────────────────── STATUS ─────────────────── -->
-      <div id="status" class="tab">
-        <div class="page-header">
-          <h2>Account Status</h2>
-          <p>Daily sending capacity across all SMTP accounts. Resets every midnight.</p>
-        </div>
-
-        <div class="stat-grid" id="statusStatGrid"></div>
-
-        <div class="card">
-          <div class="card-title">Per-Account Usage</div>
-          <div id="accountStatusContainer">
-            <div class="skeleton" style="margin-bottom:10px"></div>
-            <div class="skeleton" style="width:75%;margin-bottom:10px"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ─────────────────── RESPONDED ─────────────────── -->
       <div id="responded" class="tab">
         <div class="page-header">
           <h2>Responded Leads</h2>
@@ -1210,7 +1161,365 @@
         </div>
       </div>
 
-      <!-- ─────────────────── WORKFLOW ─────────────────── -->
+      <div id="replies" class="tab">
+        <div class="page-header">
+          <h2>Replies &amp; Pilots</h2>
+          <p>Auto-classified inbound replies, pilot lifecycle tracking, ops tickets, and full audit log.</p>
+        </div>
+
+        <div class="stat-grid" id="replyStatsGrid">
+          <div class="stat-card">
+            <div class="stat-label">Replies Received</div>
+            <div class="stat-value" id="rs-total">—</div>
+            <div class="stat-sub">all time</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Pilots Created</div>
+            <div class="stat-value" id="rs-pilots">—</div>
+            <div class="stat-sub">total</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Active Pilots</div>
+            <div class="stat-value" id="rs-active">—</div>
+            <div class="stat-sub">running now</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Unsubscribes</div>
+            <div class="stat-value" id="rs-unsubs">—</div>
+            <div class="stat-sub">do not contact</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Open Tickets</div>
+            <div class="stat-value" id="rs-tickets">—</div>
+            <div class="stat-sub">need review</div>
+          </div>
+          <div class="stat-card" style="border-color:rgba(0,212,255,0.25)">
+            <div class="stat-label" style="color:var(--cyan)">CRM Pending</div>
+            <div class="stat-value" id="rs-crm-pending" style="color:var(--cyan);text-shadow:0 0 20px rgba(0,212,255,0.4)">—</div>
+            <div class="stat-sub">said YES — confirm pilot</div>
+          </div>
+          <div class="stat-card" style="border-color:rgba(168,85,247,0.25)">
+            <div class="stat-label" style="color:#c084fc">CRM Received</div>
+            <div class="stat-value" id="rs-crm-received" style="color:#c084fc;text-shadow:0 0 20px rgba(168,85,247,0.35)">—</div>
+            <div class="stat-sub">ask to forward leads</div>
+          </div>
+        </div>
+
+        <div class="reply-tab-bar">
+          <button class="reply-tab-btn active" data-rtab="inbound">Inbound Replies</button>
+          <button class="reply-tab-btn" data-rtab="pilots">Pilots</button>
+          <button class="reply-tab-btn" data-rtab="tickets">Ops Tickets</button>
+          <button class="reply-tab-btn" data-rtab="audit">Audit Log</button>
+          <button class="reply-tab-btn" data-rtab="manual">Manual Reply</button>
+        </div>
+
+        <div id="rtab-inbound" class="reply-tab-panel active">
+          <div class="card">
+            <div class="card-title">Inbound Replies</div>
+            <div class="filter-row">
+              <select id="filter-intent">
+                <option value="">All Intents</option>
+                <option>YES_WITH_URL</option>
+                <option>YES_NO_URL</option>
+                <option>CRM_REPLY</option>
+                <option>YES_AWAITING_SETUP</option>
+                <option>FORWARDED_LEAD</option>
+                <option>ASKS_PRICE</option>
+                <option>ASKS_DETAILS</option>
+                <option>PASS_UNSUB</option>
+                <option>NEGATIVE_OBJECTION</option>
+                <option>QUESTION_OTHER</option>
+                <option>UNKNOWN</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" onclick="loadReplies()">↻ Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>From</th>
+                    <th>Intent</th>
+                    <th style="min-width:220px">Their Reply</th>
+                    <th style="min-width:220px">Our Reply</th>
+                    <th>Sent</th>
+                    <th>Via Account</th>
+                    <th>Time</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="replies-tbody">
+                  <tr><td colspan="7" style="text-align:center;color:var(--text-mute);padding:24px">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="rtab-pilots" class="reply-tab-panel">
+          <div class="card">
+            <div class="card-title">Pilot Records</div>
+            <div class="filter-row">
+              <select id="filter-pilot-status">
+                <option value="">All Statuses</option>
+                <option>pending_setup</option>
+                <option>active</option>
+                <option>running</option>
+                <option>completed</option>
+                <option>reported</option>
+                <option>converted</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" onclick="loadPilots()">↻ Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Contractor</th><th>Address / Job</th><th>Status</th><th>Inbound</th><th>Bookings</th><th>Account</th><th>Created</th><th>Update Status</th></tr>
+                </thead>
+                <tbody id="pilots-tbody">
+                  <tr><td colspan="8" style="text-align:center;color:var(--text-mute);padding:24px">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="rtab-tickets" class="reply-tab-panel">
+          <div class="card">
+            <div class="card-title">Ops Tickets</div>
+            <div class="filter-row">
+              <select id="filter-ticket-status">
+                <option value="open">Open</option>
+                <option value="resolved">Resolved</option>
+                <option value="spam">Spam</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" onclick="loadTickets()">↻ Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>From</th><th>Subject</th><th>Intent</th><th>Preview</th><th>Status</th><th>Actions</th></tr>
+                </thead>
+                <tbody id="tickets-tbody">
+                  <tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:24px">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="rtab-audit" class="reply-tab-panel">
+          <div class="card">
+            <div class="card-title">Audit Log</div>
+            <div class="filter-row">
+              <select id="filter-audit-event">
+                <option value="">All Events</option>
+                <option>REPLY_RECEIVED</option>
+                <option>AUTO_REPLY_SENT</option>
+                <option>AUTO_REPLY_FAILED</option>
+                <option>YES_CRM_PENDING</option>
+                <option>CRM_REPLY_RECEIVED</option>
+                <option>PILOT_CREATED</option>
+                <option>PILOT_STATUS_CHANGED</option>
+                <option>UNSUBSCRIBED</option>
+                <option>OPS_TICKET_CREATED</option>
+                <option>FORWARDED_LEAD_ATTACHED</option>
+                <option>MANUAL_REPLY_SENT</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" onclick="loadAudit()">↻ Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Event</th><th>Data</th><th>Time</th></tr></thead>
+                <tbody id="audit-tbody">
+                  <tr><td colspan="3" style="text-align:center;color:var(--text-mute);padding:24px">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="rtab-manual" class="reply-tab-panel">
+          <div class="card manual-form">
+            <div class="card-title">Send Manual Reply</div>
+
+            <div class="form-group">
+              <label class="field-label">To (contractor email)</label>
+              <input type="email" id="manual-to" placeholder="contractor@example.com">
+            </div>
+            <div class="form-group">
+              <label class="field-label">Subject</label>
+              <input type="text" id="manual-subject" placeholder="Re: your service inquiry">
+            </div>
+            <div class="form-group">
+              <label class="field-label">Send From (leave blank = auto-select)</label>
+              <select id="manual-account">
+                <option value="">— auto-select first connected account —</option>
+              </select>
+            </div>
+
+            <div class="form-group" style="margin-bottom:8px">
+              <label class="field-label">Quick-fill Template</label>
+              <div class="tmpl-btns">
+                <button class="tmpl-btn" data-tmpl="YES_WITH_URL">YES + URL</button>
+                <button class="tmpl-btn" data-tmpl="YES_NO_URL">YES (no URL)</button>
+                <button class="tmpl-btn" data-tmpl="CRM_REPLY">CRM Reply</button>
+                <button class="tmpl-btn" data-tmpl="FORWARDED_LEAD">Fwd Lead</button>
+                <button class="tmpl-btn" data-tmpl="NEGATIVE_OBJECTION">Apology</button>
+                <button class="tmpl-btn" data-tmpl="ASKS_PRICE">Price Q</button>
+                <button class="tmpl-btn" data-tmpl="ASKS_DETAILS">Details Q</button>
+                <button class="tmpl-btn" data-tmpl="PASS_UNSUB">Unsub</button>
+                <button class="tmpl-btn" data-tmpl="UNKNOWN">Fallback</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="field-label">Body</label>
+              <textarea id="manual-body" rows="8" placeholder="Type your reply here…"></textarea>
+            </div>
+
+            <button class="btn btn-primary" onclick="sendManualReply()">Send Reply</button>
+            <div id="manual-reply-status" style="margin-top:12px;font-size:13px"></div>
+          </div>
+        </div>
+
+      </div><div id="gmail" class="tab">
+        <div class="page-header">
+          <h2>Email Accounts</h2>
+          <p>Connect sending accounts via Gmail OAuth 2.0 or plain SMTP/IMAP. Both types rotate round-robin. Passwords are AES-GCM encrypted at rest.</p>
+        </div>
+
+        <div id="oauthBanner"></div>
+
+        <div class="reply-tab-bar">
+          <button class="reply-tab-btn active" data-etab="gmail-oauth">Gmail OAuth</button>
+          <button class="reply-tab-btn" data-etab="smtp-imap">SMTP / IMAP</button>
+        </div>
+
+        <div id="etab-gmail-oauth" class="reply-tab-panel active">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">Connect a Gmail Account</div>
+              <div class="spintax-helper" style="border-color:rgba(0,212,255,0.25);background:rgba(0,212,255,0.04)">
+                <strong style="color:var(--cyan)">🔐 OAuth 2.0 Flow</strong><br>
+                Clicking the button below opens Google's consent screen in this tab.
+                You'll be asked to authorise <em>Send &amp; Read mail on your behalf</em>.
+                After approval Google redirects back here — no password ever touches this server.
+                <br><br>
+                Connect <strong>multiple accounts</strong>; the worker rotates across all of them round-robin.
+                The reply checker reads each inbox hourly and auto-responds to contractor replies.
+              </div>
+              <div style="margin:20px 0;text-align:center">
+                <a href="/goods/auth/gmail" class="google-btn" id="gmailConnectBtn">
+                  <svg width="18" height="18" viewBox="0 0 18 18" style="margin-right:10px;flex-shrink:0">
+                    <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
+                    <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
+                    <path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/>
+                    <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/>
+                  </svg>
+                  Connect Gmail Account
+                </a>
+              </div>
+              <div style="font-size:11px;color:var(--text-mute);text-align:center;line-height:1.7">
+                Daily send limit: <strong style="color:var(--text-dim)">100 emails/account</strong> (free Gmail) ·
+                <strong style="color:var(--text-dim)">2,000/account</strong> (Google Workspace)<br>
+                Set <code>GMAIL_DAILY_LIMIT</code> env var to override.
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-title">Connected Gmail Accounts</div>
+              <div id="gmailAccountsContainer">
+                <div class="skeleton" style="margin-bottom:8px"></div>
+                <div class="skeleton" style="width:65%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="etab-smtp-imap" class="reply-tab-panel">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">Add SMTP / IMAP Account</div>
+
+              <div class="spintax-helper" style="border-color:rgba(255,176,32,0.25);background:rgba(255,176,32,0.04)">
+                <strong style="color:var(--amber)">🔒 AES-GCM Encrypted</strong><br>
+                Your SMTP password is encrypted with the same AES-256-GCM key as Gmail tokens — never stored in plaintext. IMAP is optional and used by the reply-checker.
+              </div>
+
+              <div class="form-group">
+                <label class="field-label">Display Name</label>
+                <input type="text" id="smtp-display-name" placeholder="e.g. Sales Team">
+              </div>
+              <div class="form-group">
+                <label class="field-label">From Email (sender address)</label>
+                <input type="email" id="smtp-email" placeholder="you@yourdomain.com">
+              </div>
+
+              <div style="font-family:var(--font-head);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);margin:16px 0 10px;border-bottom:1px solid var(--border);padding-bottom:6px">SMTP (Outbound)</div>
+              <div class="grid-2">
+                <div class="form-group">
+                  <label class="field-label">SMTP Host</label>
+                  <input type="text" id="smtp-host" placeholder="smtp.gmail.com">
+                </div>
+                <div class="form-group">
+                  <label class="field-label">SMTP Port</label>
+                  <input type="number" id="smtp-port" value="587" min="1" max="65535">
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="field-label">SMTP Username</label>
+                <input type="text" id="smtp-username" placeholder="usually same as From Email">
+              </div>
+              <div class="form-group">
+                <label class="field-label">SMTP Password / App Password</label>
+                <input type="password" id="smtp-password" placeholder="App password (not your main password)">
+              </div>
+
+              <div style="font-family:var(--font-head);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);margin:16px 0 10px;border-bottom:1px solid var(--border);padding-bottom:6px">IMAP (Inbound / Reply Checker) — optional</div>
+              <div class="grid-2">
+                <div class="form-group">
+                  <label class="field-label">IMAP Host</label>
+                  <input type="text" id="imap-host" placeholder="imap.gmail.com">
+                </div>
+                <div class="form-group">
+                  <label class="field-label">IMAP Port</label>
+                  <input type="number" id="imap-port" value="993" min="1" max="65535">
+                </div>
+              </div>
+
+              <button class="btn btn-primary btn-full" onclick="addSmtpAccount()">
+                ＋ Save Account
+              </button>
+              <div id="smtp-add-status"></div>
+            </div>
+
+            <div class="card">
+              <div class="card-title">Connected SMTP Accounts</div>
+              <div id="smtpAccountsContainer">
+                <div class="skeleton" style="margin-bottom:8px"></div>
+                <div class="skeleton" style="width:65%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div id="status" class="tab">
+        <div class="page-header">
+          <h2>Account Status</h2>
+          <p>Daily sending capacity across all connected Gmail accounts. Resets every midnight.</p>
+        </div>
+        <div class="stat-grid" id="statusStatGrid"></div>
+        <div class="card">
+          <div class="card-title">Per-Account Usage</div>
+          <div id="accountStatusContainer">
+            <div class="skeleton" style="margin-bottom:10px"></div>
+            <div class="skeleton" style="width:75%;margin-bottom:10px"></div>
+          </div>
+        </div>
+      </div>
+
       <div id="workflow" class="tab">
         <div class="page-header">
           <h2>Workflow</h2>
@@ -1221,9 +1530,10 @@
           <div class="card-title">Manual Trigger</div>
           <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">
             The worker runs automatically every hour via cron. Use this to fire it immediately.
+            It both sends queued outreach emails AND checks all inboxes for replies to auto-respond.
           </p>
           <button class="btn btn-primary" onclick="triggerWorkflow()">
-            ▶ Run Email Worker Now
+            ▶ Run Worker Now
           </button>
           <div id="workflowStatus"></div>
         </div>
@@ -1237,9 +1547,107 @@
         </div>
       </div>
 
-    </div><!-- /content -->
-  </div><!-- /main -->
-</div><!-- /layout -->
+    </div></div></div><script>
+(function() {
+  // Inject tab panel HTML right before the closing </div>const content = document.querySelector('.content');
+  const panel = document.createElement('div');
+  panel.id = 'notifications';
+  panel.className = 'tab';
+  panel.innerHTML = `
+    <div class="page-header">
+      <h2>Notifications</h2>
+      <p>Push notifications to your phone via <strong style="color:var(--neon)">ntfy.sh</strong>. Make sure you have the app installed and subscribed to your topic.</p>
+    </div>
+
+    <div class="card" style="border-color:rgba(0,212,255,0.25);background:rgba(0,212,255,0.03)">
+      <div class="card-title" style="color:var(--cyan)">📱 Setup</div>
+      <div style="display:grid;gap:10px;font-size:13px;color:var(--text-dim);line-height:1.8">
+        <div><span style="color:var(--neon);font-weight:700">1.</span> Download the <strong style="color:var(--text)">ntfy</strong> app on your phone (iOS / Android — it's free)</div>
+        <div><span style="color:var(--neon);font-weight:700">2.</span> Open the app → tap <strong style="color:var(--text)">"+"</strong> → subscribe to your topic name</div>
+        <div><span style="color:var(--neon);font-weight:700">3.</span> Add <code style="color:var(--neon)">NTFY_TOPIC=your-topic-name</code> to your <code>.env</code> file on the server</div>
+        <div><span style="color:var(--neon);font-weight:700">4.</span> Redeploy / restart your server — done ✓</div>
+      </div>
+      <div style="margin-top:16px;padding:12px 16px;background:rgba(0,0,0,0.3);border-radius:6px;border:1px solid rgba(0,255,157,0.1)">
+        <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-mute);font-family:var(--font-head);margin-bottom:6px">.env entry</div>
+        <code style="color:var(--neon);font-size:13px">NTFY_TOPIC=replyze-yourname</code>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">✉️ Send a Custom Notification</div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="field-label">Title</label>
+          <input type="text" id="ntfy-title" placeholder="e.g. Test Alert" value="Hello from Replyze">
+        </div>
+        <div class="form-group">
+          <label class="field-label">Priority</label>
+          <select id="ntfy-priority">
+            <option value="urgent">🔴 Urgent</option>
+            <option value="high">🟠 High</option>
+            <option value="default" selected>🟡 Default</option>
+            <option value="low">🟢 Low</option>
+            <option value="min">⚪ Min</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="field-label">Message</label>
+        <textarea id="ntfy-message" rows="3" placeholder="Notification body text…">This is a test from your admin panel.</textarea>
+      </div>
+      <button class="btn btn-primary" onclick="sendCustomNotification()">
+        📤 Send to Phone
+      </button>
+      <div id="ntfy-custom-status" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🧪 Test All Event Types</div>
+      <p style="font-size:12px;color:var(--text-dim);margin-bottom:20px">
+        Fire a sample notification for every event in the system — no emails sent, no DB touched. 
+        Each fires 1 second apart so your phone shows them as separate banners.
+      </p>
+      <div id="ntfy-test-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:20px">
+        ${[
+          { key:'pilot_created',      icon:'🏠', label:'Pilot Created',          desc:'Contractor sent a service URL',         priority:'high'    },
+          { key:'yes_no_url',         icon:'📋', label:'Business Owner Interested',        desc:'Interested but no URL yet',        priority:'high'    },
+          { key:'forwarded_lead',     icon:'📨', label:'Forwarded Lead',          desc:'Business Owner forwarded a client',          priority:'high'    },
+          { key:'negative',           icon:'⚠️', label:'Negative Objection',      desc:'Angry / correcting wrong info',    priority:'high'    },
+          { key:'auto_reply_failed',  icon:'❌', label:'Auto-Reply Failed',       desc:'Could not send auto-reply',        priority:'high'    },
+          { key:'asks_price',         icon:'💰', label:'Pricing Question',        desc:'Business Owner asked about cost',           priority:'default' },
+          { key:'asks_details',       icon:'❓', label:'Details Question',        desc:'Business Owner asked how it works',         priority:'default' },
+          { key:'unsubscribe',        icon:'🚫', label:'Unsubscribe',             desc:'Business Owner opted out',                  priority:'low'     },
+          { key:'run_complete',       icon:'📬', label:'Reply Run Complete',      desc:'Worker finished a scan',           priority:'low'     },
+          { key:'campaign_queued',    icon:'📣', label:'Campaign Queued',         desc:'Emails queued for sending',        priority:'default' },
+          { key:'manual_reply_sent',  icon:'📤', label:'Manual Reply Sent',       desc:'Admin sent a manual reply',        priority:'low'     },
+          { key:'ticket_resolved',    icon:'✅', label:'Ticket Resolved',         desc:'Ops ticket marked resolved',       priority:'low'     },
+          { key:'batch_done',         icon:'📧', label:'Batch Sent',              desc:'Email batch complete',             priority:'low'     },
+          { key:'send_limit',         icon:'⚠️', label:'Daily Limit Hit',         desc:'All SMTP accounts capped',         priority:'high'    },
+        ].map(ev => `
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:rgba(0,0,0,0.3);border:1px solid rgba(0,255,157,0.1);border-radius:6px;gap:10px">
+            <div>
+              <div style="font-size:13px;font-family:var(--font-head);font-weight:600;color:var(--text)">${ev.icon} ${ev.label}</div>
+              <div style="font-size:11px;color:var(--text-mute);margin-top:2px">${ev.desc}</div>
+            </div>
+            <button class="btn btn-outline btn-sm" style="white-space:nowrap;flex-shrink:0" onclick="testSingleEvent('${ev.key}')">
+              Test
+            </button>
+          </div>`).join('')}
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="testAllEvents()">
+          🚀 Fire All (14)
+        </button>
+        <button class="btn btn-outline" onclick="testAllHighPriority()">
+          🔴 High-Priority Only (5)
+        </button>
+      </div>
+      <div id="ntfy-test-status" style="margin-top:12px"></div>
+    </div>
+  `;
+  content.appendChild(panel);
+})();
+</script>
 
 
 <script>
@@ -1248,19 +1656,24 @@
   ═══════════════════════════════════════════ */
   let currentLists     = [];
   let currentCampaigns = [];
-  let smtpAccounts     = [];
+  let gmailAccounts    = [];
   let accountStatuses  = [];
   let respondedLeads   = [];
 
+  const BASE = '/goods';
+
   const tabTitles = {
-    import:    'Import Leads',
-    campaigns: 'Campaigns',
-    templates: 'Templates',
-    analytics: 'Analytics',
-    smtp:      'SMTP Accounts',
-    status:    'Account Status',
-    responded: 'Responded Leads',
-    workflow:  'Workflow'
+    import:        'Import Leads',
+    campaigns:     'Campaigns',
+    templates:     'Templates',
+    analytics:     'Analytics',
+    gmail:         'Email Accounts',
+    status:        'Account Status',
+    responded:     'Responded Leads',
+    replies:       'Replies & Pilots',
+    workflow:      'Workflow',
+    notifications: 'Notifications',
+    diagnosis:     'Campaign AI Diagnosis'
   };
 
   /* ═══════════════════════════════════════════
@@ -1270,18 +1683,22 @@
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     document.getElementById(name).classList.add('active');
-    document.getElementById('nav-' + name).classList.add('active');
+    const navEl = document.getElementById('nav-' + name);
+    if (navEl) navEl.classList.add('active');
     document.getElementById('topbarTitle').textContent = tabTitles[name] || name;
 
     const loaders = {
-      import:    () => loadLists(),
-      campaigns: () => { loadLists(); loadCampaigns(); },
-      templates: () => loadTemplates(),
-      analytics: () => loadCampaignsForAnalytics(),
-      smtp:      () => loadSmtpAccounts(),
-      status:    () => loadAccountStatus(),
-      responded: () => loadRespondedLeads(),
-      workflow:  () => loadWorkflowRuns()
+      import:        () => loadLists(),
+      campaigns:     () => { loadLists(); loadCampaigns(); },
+      templates:     () => loadTemplates(),
+      analytics:     () => loadCampaignsForAnalytics(),
+      diagnosis:     () => loadDiagnosisCampaigns(),
+      gmail:         () => { loadGmailAccounts(); loadSmtpAccounts(); },
+      status:        () => loadAccountStatus(),
+      responded:     () => loadRespondedLeads(),
+      replies:       () => { loadReplyStats(); loadReplies(); },
+      workflow:      () => loadWorkflowRuns(),
+      notifications: () => {}
     };
     if (loaders[name]) loaders[name]();
   }
@@ -1290,14 +1707,55 @@
      HELPERS
   ═══════════════════════════════════════════ */
   function showAlert(id, msg, type = 'info') {
-    document.getElementById(id).innerHTML =
-      `<div class="alert alert-${type}">${msg}</div>`;
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
   }
 
   function fmt(iso) {
+    if (!iso) return '—';
     return new Date(iso).toLocaleString(undefined, {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
+  }
+
+  function esc(str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function intentBadge(intent) {
+    if (!intent) return '<span class="badge badge-UNKNOWN">?</span>';
+    return `<span class="badge badge-${intent}">${intent.replace(/_/g,' ')}</span>`;
+  }
+
+  function pilotBadge(status) {
+    if (!status) return '—';
+    return `<span class="badge badge-${status}">${status.replace(/_/g,' ')}</span>`;
+  }
+
+  /* ═══════════════════════════════════════════
+     OAUTH RESULT BANNER
+  ═══════════════════════════════════════════ */
+  function checkOAuthResult() {
+    const params = new URLSearchParams(window.location.search);
+    const banner = document.getElementById('oauthBanner');
+    if (!banner) return;
+
+    if (params.get('oauth_success') === '1') {
+      banner.innerHTML = `<div class="alert alert-success" style="margin-bottom:16px">
+        ✓ Gmail account connected successfully! It will appear in the list below.
+      </div>`;
+      showTab('gmail');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('oauth_error')) {
+      banner.innerHTML = `<div class="alert alert-error" style="margin-bottom:16px">
+        OAuth error: ${params.get('oauth_error')}. Please try again.
+      </div>`;
+      showTab('gmail');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }
 
   /* ═══════════════════════════════════════════
@@ -1305,7 +1763,7 @@
   ═══════════════════════════════════════════ */
   async function loadLists() {
     try {
-      const r = await fetch('/api/leads/lists');
+      const r = await fetch(`${BASE}/api/leads/lists`);
       if (!r.ok) return;
       const d = await r.json();
       currentLists = d.lists || [];
@@ -1324,9 +1782,9 @@
       <thead><tr><th>List Name</th><th>Leads</th><th></th></tr></thead>
       <tbody>${currentLists.map(l => `
         <tr>
-          <td>${l.list_name}</td>
+          <td>${esc(l.list_name)}</td>
           <td><span class="badge badge-cyan">${l.lead_count}</span></td>
-          <td><button class="btn btn-ghost btn-sm" onclick="viewList('${l.list_name}')">View</button></td>
+          <td><button class="btn btn-ghost btn-sm" onclick="viewList('${esc(l.list_name)}')">View</button></td>
         </tr>`).join('')}
       </tbody>
     </table></div>`;
@@ -1336,7 +1794,7 @@
     const d = document.getElementById('campaignList');
     d.innerHTML = '<option value="">Select a list…</option>';
     currentLists.forEach(l => {
-      d.innerHTML += `<option value="${l.list_name}">${l.list_name} (${l.lead_count} leads)</option>`;
+      d.innerHTML += `<option value="${esc(l.list_name)}">${esc(l.list_name)} (${l.lead_count} leads)</option>`;
     });
   }
 
@@ -1352,12 +1810,12 @@
     fd.append('list_name', listName);
 
     try {
-      const r = await fetch('/api/leads/import', { method: 'POST', body: fd });
+      const r = await fetch(`${BASE}/api/leads/import`, { method: 'POST', body: fd });
       const d = await r.json();
       if (r.ok) {
         showAlert('importStatus', `✓ Successfully imported <strong>${d.imported}</strong> leads into "${listName}".`, 'success');
-        document.getElementById('csvFile').value = '';
-        document.getElementById('listName').value = '';
+        document.getElementById('csvFile').value   = '';
+        document.getElementById('listName').value  = '';
         loadLists();
       } else {
         showAlert('importStatus', `Error: ${d.error} — ${d.detail || ''}`, 'error');
@@ -1368,7 +1826,7 @@
   }
 
   function viewList(name) {
-    alert(`List: ${name}\nOpening list view is not implemented in this version.`);
+    alert(`List: ${name}\nDetailed list view can be added as a future feature.`);
   }
 
   /* ═══════════════════════════════════════════
@@ -1393,12 +1851,12 @@
         </div>
         <div class="form-group">
           <label class="field-label">Subject — spintax ok</label>
-          <input class="followup-subject" type="text" placeholder="{{Following up|Checking in}}">
+          <input class="followup-subject" type="text" placeholder="{ {Following up|Checking in} }">
         </div>
       </div>
       <div class="form-group">
         <label class="field-label">Body — spintax ok</label>
-        <textarea class="followup-body" rows="4" placeholder="{{Just wanted to|Wanted to}} follow up..."></textarea>
+        <textarea class="followup-body" rows="4" placeholder="{ {Just wanted to|Wanted to} } follow up..."></textarea>
       </div>`;
     c.appendChild(d);
   }
@@ -1409,6 +1867,8 @@
     const subject = document.getElementById('campaignSubject').value.trim();
     const body    = document.getElementById('campaignBody').value.trim();
     const imm     = document.getElementById('sendImmediately').checked;
+    const delay   = parseInt(document.getElementById('sendDelay').value)  || 0;
+    const jitter  = parseInt(document.getElementById('sendJitter').value) || 0;
 
     if (!name || !list || !subject || !body)
       return showAlert('campaignStatus', 'Please fill in all required fields.', 'error');
@@ -1424,18 +1884,22 @@
     });
 
     showAlert('campaignStatus', 'Creating campaign…', 'info');
+    const throttleNote = delay > 0 ? ` Throttle: ${delay}s ± ${jitter}s between sends.` : '';
 
     try {
-      const r = await fetch('/api/campaigns', {
+      const r = await fetch(`${BASE}/api/campaigns`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ name, list_name: list, subject, body,
-                               follow_ups: followups, send_immediately: imm })
+        body: JSON.stringify({
+          name, list_name: list, subject, body,
+          follow_ups: followups, send_immediately: imm,
+          send_delay_seconds: delay, send_jitter_seconds: jitter
+        })
       });
       const d = await r.json();
       if (r.ok) {
         showAlert('campaignStatus',
-          `✓ Campaign "<strong>${name}</strong>" created!${imm ? ' Initial emails queued.' : ''}`,
+          `✓ Campaign "<strong>${name}</strong>" created!${imm ? ' Initial emails queued.' : ''}${throttleNote}`,
           'success');
         document.getElementById('campaignName').value    = '';
         document.getElementById('campaignSubject').value = '';
@@ -1461,7 +1925,7 @@
 
   async function loadCampaigns() {
     try {
-      const r = await fetch('/api/campaigns');
+      const r = await fetch(`${BASE}/api/campaigns`);
       if (!r.ok) return;
       const d = await r.json();
       currentCampaigns = d.campaigns || [];
@@ -1479,8 +1943,8 @@
       <thead><tr><th>Name</th><th>List</th><th>Created</th><th>Actions</th></tr></thead>
       <tbody>${currentCampaigns.map(c => `
         <tr>
-          <td style="font-weight:500">${c.name}</td>
-          <td><span class="badge badge-cyan">${c.list_name}</span></td>
+          <td style="font-weight:500">${esc(c.name)}</td>
+          <td><span class="badge badge-cyan">${esc(c.list_name)}</span></td>
           <td style="color:var(--text-dim)">${fmt(c.created_at)}</td>
           <td style="display:flex;gap:6px">
             <button class="btn btn-ghost btn-sm" onclick="queueFollowup(${c.id},1)">Send FU-1</button>
@@ -1492,7 +1956,7 @@
 
   async function queueFollowup(campaignId, seq) {
     try {
-      const r = await fetch('/api/queue-followup', {
+      const r = await fetch(`${BASE}/api/queue-followup`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ campaign_id: campaignId, sequence: seq })
@@ -1510,23 +1974,23 @@
       <div style="display:grid;gap:16px">
         <div class="followup-block">
           <div class="followup-header"><span class="followup-title">Initial Outreach — with spintax</span></div>
-          <div class="spintax-example">Subject: {{Quick question|Reaching out|Connecting}} for {name} at {brokerage}
+          <div class="spintax-example">{% raw %}Subject: {{Quick question|Reaching out|Connecting}} for {name} at {company}
 
 {{Hi|Hello|Hey}} {name},
 
-{{I noticed|I came across|I saw}} you're {{working at|with}} {brokerage} in {city}. {{I'd love to connect|I wanted to reach out}} and discuss how our {service} might {{benefit|help}} your clients.
+{{I noticed|I came across|I saw}} you're {{working at|with}} {company} in {city}. {{I'd love to connect|I wanted to reach out}} and discuss how our {service} might {{benefit|help}} your clients.
 
-{{Looking forward to hearing from you|Hope to connect soon|Best regards}},</div>
+{{Looking forward to hearing from you|Hope to connect soon|Best regards}},{% endraw %}</div>
         </div>
         <div class="followup-block">
           <div class="followup-header"><span class="followup-title">Follow-up — with spintax</span></div>
-          <div class="spintax-example">Subject: {{Following up|Checking in|Quick follow-up}}
+          <div class="spintax-example">{% raw %}Subject: {{Following up|Checking in|Quick follow-up}}
 
 {{Hi|Hey}} {name},
 
-{{Just wanted to|Wanted to|I'm|Simply}} follow up on my previous {{email|message|note}}. {{Would you have time|Do you have time}} for a quick call {{this week|soon}} to discuss {service}?
+{{Just wanted to|Wanted to|Simply}} follow up on my previous {{email|message|note}}. {{Would you have time|Do you have time}} for a quick call {{this week|soon}} to discuss {service}?
 
-{{Best|Thanks|Cheers}},</div>
+{{Best|Thanks|Cheers}},{% endraw %}</div>
         </div>
       </div>`;
   }
@@ -1536,13 +2000,13 @@
   ═══════════════════════════════════════════ */
   async function loadCampaignsForAnalytics() {
     try {
-      const r = await fetch('/api/campaigns');
+      const r = await fetch(`${BASE}/api/campaigns`);
       if (!r.ok) return;
       const d = await r.json();
       const sel = document.getElementById('campaignSelect');
       sel.innerHTML = '<option value="">Select a campaign…</option>';
       (d.campaigns || []).forEach(c => {
-        sel.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+        sel.innerHTML += `<option value="${c.id}">${esc(c.name)}</option>`;
       });
       sel.onchange = function() {
         this.value ? loadCampaignClicks(this.value) :
@@ -1554,7 +2018,7 @@
 
   async function checkAIUsage(leadId) {
     try {
-      const r = await fetch(`/api/leads/${leadId}/ai-usage`);
+      const r = await fetch(`${BASE}/api/leads/${leadId}/ai-usage`);
       const d = await r.json();
       return d.ai_usage
         ? `<span class="badge badge-green">✓ ${d.ai_usage.usage_count}x</span>`
@@ -1566,7 +2030,7 @@
     const tb = document.getElementById('clickData');
     tb.innerHTML = '<tr><td colspan="4" style="color:var(--text-mute);text-align:center;padding:20px">Loading…</td></tr>';
     try {
-      const r = await fetch(`/api/campaigns/${campaignId}/clicks`);
+      const r = await fetch(`${BASE}/api/campaigns/${campaignId}/clicks`);
       if (!r.ok) throw new Error('API error');
       const d = await r.json();
       tb.innerHTML = '';
@@ -1576,8 +2040,8 @@
           const row  = document.createElement('tr');
           const urlS = click.url.length > 50 ? click.url.slice(0,50)+'…' : click.url;
           row.innerHTML = `
-            <td style="font-family:var(--font-mono);font-size:12px">${click.leads?.email||'Unknown'}</td>
-            <td style="font-size:12px;color:var(--text-dim)" title="${click.url}">${urlS}</td>
+            <td style="font-family:var(--font-mono);font-size:12px">${esc(click.leads?.email||'Unknown')}</td>
+            <td style="font-size:12px;color:var(--text-dim)" title="${esc(click.url)}">${esc(urlS)}</td>
             <td style="font-size:12px;color:var(--text-dim)">${fmt(click.clicked_at)}</td>
             <td>${ai}</td>`;
           tb.appendChild(row);
@@ -1591,11 +2055,71 @@
   }
 
   /* ═══════════════════════════════════════════
+     EMAIL ACCOUNT SUB-TABS (Gmail vs SMTP)
+  ═══════════════════════════════════════════ */
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('[data-etab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-etab]').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.reply-tab-panel[id^="etab-"]').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        const panel = document.getElementById('etab-' + btn.dataset.etab);
+        if (panel) panel.classList.add('active');
+      });
+    });
+  });
+
+  /* ═══════════════════════════════════════════
      SMTP ACCOUNTS
   ═══════════════════════════════════════════ */
+  let smtpAccounts = [];
+
+  async function addSmtpAccount() {
+    const displayName = document.getElementById('smtp-display-name').value.trim();
+    const email       = document.getElementById('smtp-email').value.trim();
+    const smtpHost    = document.getElementById('smtp-host').value.trim();
+    const smtpPort    = parseInt(document.getElementById('smtp-port').value) || 587;
+    const smtpUser    = document.getElementById('smtp-username').value.trim();
+    const smtpPass    = document.getElementById('smtp-password').value;
+    const imapHost    = document.getElementById('imap-host').value.trim();
+    const imapPort    = parseInt(document.getElementById('imap-port').value) || 993;
+
+    if (!email || !smtpHost || !smtpUser || !smtpPass)
+      return showAlert('smtp-add-status', 'Email, SMTP host, username and password are all required.', 'error');
+
+    showAlert('smtp-add-status', '🔄 Testing connection and saving…', 'info');
+
+    try {
+      const r = await fetch(`${BASE}/api/smtp-accounts`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          email, display_name: displayName,
+          smtp_host: smtpHost, smtp_port: smtpPort,
+          smtp_username: smtpUser, smtp_password: smtpPass,
+          imap_host: imapHost || null, imap_port: imapHost ? imapPort : null
+        })
+      });
+      const d = await r.json();
+      if (r.ok) {
+        showAlert('smtp-add-status', `✓ ${esc(email)} saved! Click <strong>Test</strong> on the account card to verify the connection.`, 'success');
+        ['smtp-display-name','smtp-email','smtp-host','smtp-username','smtp-password','imap-host'].forEach(id => {
+          document.getElementById(id).value = '';
+        });
+        document.getElementById('smtp-port').value  = '587';
+        document.getElementById('imap-port').value  = '993';
+        loadSmtpAccounts();
+      } else {
+        showAlert('smtp-add-status', `Error: ${d.error}${d.detail ? ' — ' + d.detail : ''}`, 'error');
+      }
+    } catch(e) {
+      showAlert('smtp-add-status', 'Request failed: ' + e.message, 'error');
+    }
+  }
+
   async function loadSmtpAccounts() {
     try {
-      const r = await fetch('/api/smtp-accounts');
+      const r = await fetch(`${BASE}/api/smtp-accounts`);
       if (!r.ok) return;
       const d = await r.json();
       smtpAccounts = d.accounts || [];
@@ -1606,75 +2130,131 @@
   function renderSmtpAccounts() {
     const c = document.getElementById('smtpAccountsContainer');
     if (!smtpAccounts.length) {
-      c.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📡</div><p>No accounts configured yet.</p></div>`;
+      c.innerHTML = `<div class="empty-state">
+        <div class="empty-state-icon">🖥️</div>
+        <p>No SMTP accounts added yet.<br>Fill in the form on the left to add one.</p>
+      </div>`;
       return;
     }
-    c.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>Email</th><th>Display Name</th><th>SMTP Host</th><th>Actions</th></tr></thead>
-      <tbody>${smtpAccounts.map(a => `
-        <tr>
-          <td style="font-family:var(--font-mono);font-size:12px">${a.email}</td>
-          <td>${a.display_name}</td>
-          <td style="color:var(--text-dim);font-size:12px">${a.smtp_host}:${a.smtp_port}</td>
-          <td style="display:flex;gap:6px">
-            <button class="btn btn-ghost btn-sm" onclick="testSmtpAccount(${a.id})">Test</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteSmtpAccount(${a.id})">Delete</button>
-          </td>
-        </tr>`).join('')}
-      </tbody>
-    </table></div>`;
+    c.innerHTML = smtpAccounts.map(a => `
+      <div class="account-card" style="margin-bottom:10px">
+        <div class="account-indicator good"></div>
+        <div class="account-info">
+          <div class="account-email">${esc(a.email)}</div>
+          <div class="account-name">
+            ${esc(a.display_name || '')}
+            · <span style="color:var(--text-mute)">SMTP: ${esc(a.smtp_host)}:${a.smtp_port}</span>
+            ${a.imap_host ? `· <span style="color:var(--text-mute)">IMAP: ${esc(a.imap_host)}:${a.imap_port}</span>` : ''}
+          </div>
+          <div style="font-size:10px;color:var(--text-mute);margin-top:3px">Added ${fmt(a.created_at)}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <span class="badge badge-amber">SMTP</span>
+          <button class="btn btn-ghost btn-sm" onclick="testSmtpAccount(${a.id}, '${esc(a.email)}')">Test</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteSmtpAccount(${a.id}, '${esc(a.email)}')">Remove</button>
+        </div>
+      </div>`).join('');
   }
 
-  async function addSmtpAccount() {
-    const email    = document.getElementById('smtpEmail').value.trim();
-    const name     = document.getElementById('smtpDisplayName').value.trim();
-    const host     = document.getElementById('smtpHost').value.trim();
-    const port     = document.getElementById('smtpPort').value;
-    const user     = document.getElementById('smtpUsername').value.trim();
-    const pass     = document.getElementById('smtpPassword').value;
-    const iHost    = document.getElementById('imapHost').value.trim();
-    const iPort    = document.getElementById('imapPort').value;
-
-    if (!email || !host || !port || !user || !pass)
-      return showAlert('smtpStatus', 'Please fill all required fields.', 'error');
-
-    showAlert('smtpStatus', 'Connecting & saving…', 'info');
-
-    const body = { email, display_name: name || email,
-                   smtp_host: host, smtp_port: parseInt(port),
-                   smtp_username: user, smtp_password: pass };
-    if (iHost) { body.imap_host = iHost; body.imap_port = parseInt(iPort); }
-
+  async function testSmtpAccount(id, email) {
+    const btn = event.target;
+    btn.disabled = true; btn.textContent = '…';
     try {
-      const r = await fetch('/api/smtp-accounts', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(body)
-      });
+      const r = await fetch(`${BASE}/api/smtp-accounts/${id}/test`, { method: 'POST' });
       const d = await r.json();
       if (r.ok) {
-        showAlert('smtpStatus', `✓ Account <strong>${email}</strong> added successfully!`, 'success');
-        ['smtpEmail','smtpDisplayName','smtpHost','smtpUsername','smtpPassword','imapHost'].forEach(id => {
-          document.getElementById(id).value = '';
-        });
-        document.getElementById('smtpPort').value = '587';
-        document.getElementById('imapPort').value = '993';
-        loadSmtpAccounts();
+        alert(`✅ Test passed! Email sent to ${email}.\nCheck the inbox to confirm delivery.`);
+      } else if (d.error === 'connection_failed') {
+        alert(
+          `⚠️ Cannot test from this server\n\n` +
+          `Your hosting platform blocks outbound SMTP ports (587 / 465).\n\n` +
+          `This is NORMAL — your credentials are saved and your GitHub Actions worker ` +
+          `will send fine because it runs on GitHub's infrastructure, which has no SMTP block.\n\n` +
+          `To confirm: trigger a workflow run and check if emails are delivered.`
+        );
       } else {
-        showAlert('smtpStatus', `Error: ${d.error} — ${d.detail||''}`, 'error');
+        alert(`Test failed: ${d.error}\n\n${d.detail || ''}`);
       }
     } catch(e) {
-      showAlert('smtpStatus', 'Request failed: ' + e.message, 'error');
+      alert('Test request failed: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Test';
     }
   }
 
-  function testSmtpAccount(id) {
-    alert(`Test SMTP ${id}: This would be implemented via a /api/smtp-accounts/${id}/test endpoint.`);
+  async function deleteSmtpAccount(id, email) {
+    if (!confirm(`Remove SMTP account ${email}?\n\nThis will delete the stored credentials. Any queued emails assigned to this account may fail.`)) return;
+    try {
+      const r = await fetch(`${BASE}/api/smtp-accounts/${id}`, { method: 'DELETE' });
+      if (r.ok) { loadSmtpAccounts(); }
+      else { const d = await r.json(); alert(`Error: ${d.error}`); }
+    } catch(e) { alert('Request failed: ' + e.message); }
   }
 
-  function deleteSmtpAccount(id) {
-    if (confirm('Delete this SMTP account?')) {
-      alert(`Delete SMTP ${id}: Implement DELETE /api/smtp-accounts/${id}.`);
+  /* ═══════════════════════════════════════════
+     GMAIL ACCOUNTS
+  ═══════════════════════════════════════════ */
+  async function loadGmailAccounts() {
+    try {
+      const r = await fetch(`${BASE}/api/gmail-accounts`);
+      if (!r.ok) return;
+      const d = await r.json();
+      gmailAccounts = d.accounts || [];
+      renderGmailAccounts();
+    } catch(e) { console.error(e); }
+  }
+
+  function renderGmailAccounts() {
+    const c = document.getElementById('gmailAccountsContainer');
+    if (!gmailAccounts.length) {
+      c.innerHTML = `<div class="empty-state">
+        <div class="empty-state-icon">📧</div>
+        <p>No accounts connected yet.<br>Click <strong style="color:var(--neon)">Connect Gmail Account</strong> on the left to get started.</p>
+      </div>`;
+      return;
     }
+    c.innerHTML = gmailAccounts.map(a => {
+      const connected = a.gmail_connected;
+      const cls = connected ? 'good' : 'danger';
+      const lbl = connected ? 'badge-green' : 'badge-red';
+      const txt = connected ? 'Connected' : 'Disconnected';
+      return `<div class="account-card" style="margin-bottom:10px">
+        <div class="account-indicator ${cls}"></div>
+        <div class="account-info">
+          <div class="account-email">${esc(a.email)}</div>
+          <div class="account-name">${esc(a.display_name || '')} · Connected ${fmt(a.created_at)}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <span class="badge ${lbl}">${txt}</span>
+          <button class="btn btn-ghost btn-sm" onclick="testGmailAccount(${a.id}, '${esc(a.email)}')">Test</button>
+          <button class="btn btn-danger btn-sm" onclick="disconnectGmailAccount(${a.id}, '${esc(a.email)}')">Disconnect</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async function testGmailAccount(id, email) {
+    const btn = event.target;
+    btn.disabled = true; btn.textContent = '…';
+    try {
+      const r = await fetch(`${BASE}/api/gmail-accounts/${id}/test`, { method: 'POST' });
+      const d = await r.json();
+      r.ok ? alert(`✓ Test email sent to ${email}! Check that inbox.`)
+           : alert(`Test failed: ${d.error} — ${d.detail || ''}`);
+    } catch(e) {
+      alert('Test request failed: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Test';
+    }
+  }
+
+  async function disconnectGmailAccount(id, email) {
+    if (!confirm(`Disconnect ${email}?\n\nThis will revoke the OAuth token and remove the account. You can reconnect at any time.`)) return;
+    try {
+      const r = await fetch(`${BASE}/api/gmail-accounts/${id}`, { method: 'DELETE' });
+      if (r.ok) { loadGmailAccounts(); }
+      else { const d = await r.json(); alert(`Error: ${d.error}`); }
+    } catch(e) { alert('Request failed: ' + e.message); }
   }
 
   /* ═══════════════════════════════════════════
@@ -1682,7 +2262,7 @@
   ═══════════════════════════════════════════ */
   async function loadAccountStatus() {
     try {
-      const r = await fetch('/api/account-status');
+      const r = await fetch(`${BASE}/api/account-status`);
       if (!r.ok) return;
       const d = await r.json();
       accountStatuses = d.accounts || [];
@@ -1691,40 +2271,38 @@
   }
 
   function renderAccountStatus() {
-    const c   = document.getElementById('accountStatusContainer');
-    const sg  = document.getElementById('statusStatGrid');
-
+    const c  = document.getElementById('accountStatusContainer');
+    const sg = document.getElementById('statusStatGrid');
     if (!accountStatuses.length) {
-      c.innerHTML  = `<div class="empty-state"><div class="empty-state-icon">⚡</div><p>No accounts found.</p></div>`;
+      c.innerHTML  = `<div class="empty-state"><div class="empty-state-icon">⚡</div><p>No Gmail accounts connected yet.</p></div>`;
       sg.innerHTML = '';
       return;
     }
-
-    const totalSent      = accountStatuses.reduce((s, a) => s + a.sent_today, 0);
-    const totalRemaining = accountStatuses.reduce((s, a) => s + a.remaining_today, 0);
-    const activeAccounts = accountStatuses.filter(a => a.remaining_today > 0).length;
+    const totalSent      = accountStatuses.reduce((s,a) => s + a.sent_today, 0);
+    const totalRemaining = accountStatuses.reduce((s,a) => s + a.remaining_today, 0);
+    const activeAccounts = accountStatuses.filter(a => a.remaining_today > 0 && a.gmail_connected).length;
 
     sg.innerHTML = `
-      <div class="stat-card"><div class="stat-label">Total Accounts</div><div class="stat-value">${accountStatuses.length}</div><div class="stat-sub">configured</div></div>
+      <div class="stat-card"><div class="stat-label">Gmail Accounts</div><div class="stat-value">${accountStatuses.length}</div><div class="stat-sub">connected</div></div>
       <div class="stat-card"><div class="stat-label">Active Today</div><div class="stat-value">${activeAccounts}</div><div class="stat-sub">with capacity</div></div>
       <div class="stat-card"><div class="stat-label">Sent Today</div><div class="stat-value">${totalSent}</div><div class="stat-sub">emails out</div></div>
       <div class="stat-card"><div class="stat-label">Remaining Today</div><div class="stat-value">${totalRemaining}</div><div class="stat-sub">capacity left</div></div>`;
 
     c.innerHTML = accountStatuses.map(a => {
-      const pct  = (a.sent_today / 100) * 100;
-      const cls  = a.remaining_today > 10 ? 'good' : a.remaining_today > 0 ? 'warn' : 'danger';
-      const lbl  = a.remaining_today > 10 ? 'badge-green' : a.remaining_today > 0 ? 'badge-amber' : 'badge-red';
-      const txt  = a.remaining_today > 0 ? 'Active' : 'Exhausted';
+      const limit = a.daily_limit || 500;
+      const pct   = Math.min((a.sent_today / limit) * 100, 100);
+      const cls   = a.remaining_today > (limit * 0.1) ? 'good' : a.remaining_today > 0 ? 'warn' : 'danger';
+      const lbl   = cls === 'good' ? 'badge-green' : cls === 'warn' ? 'badge-amber' : 'badge-red';
+      const txt   = a.remaining_today > 0 ? 'Active' : 'Exhausted';
       return `<div class="account-card">
         <div class="account-indicator ${cls}"></div>
         <div class="account-info">
-          <div class="account-email">${a.email}</div>
-          <div class="account-name">${a.display_name}</div>
+          <div class="account-email">${esc(a.email)}</div>
+          <div class="account-name">${esc(a.display_name)}</div>
           <div class="progress-bar"><div class="progress-fill ${cls}" style="width:${pct}%"></div></div>
         </div>
-        <div class="account-bar-wrap" style="display:none"></div>
         <div class="account-stats">
-          <div class="account-count">${a.sent_today}<span style="font-size:13px;color:var(--text-mute)">/100</span></div>
+          <div class="account-count">${a.sent_today}<span style="font-size:13px;color:var(--text-mute)">/${limit}</span></div>
           <div class="account-limit"><span class="badge ${lbl}">${txt}</span></div>
         </div>
       </div>`;
@@ -1736,7 +2314,7 @@
   ═══════════════════════════════════════════ */
   async function loadRespondedLeads() {
     try {
-      const r = await fetch('/api/responded-leads');
+      const r = await fetch(`${BASE}/api/responded-leads`);
       if (!r.ok) return;
       const d = await r.json();
       respondedLeads = d.responded_leads || [];
@@ -1751,13 +2329,13 @@
       return;
     }
     c.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>Email</th><th>Name</th><th>Responded At</th><th>List</th></tr></thead>
+      <thead><tr><th>Email</th><th>Name</th><th>Intent</th><th>Responded At</th></tr></thead>
       <tbody>${respondedLeads.map(l => `
         <tr>
-          <td style="font-family:var(--font-mono);font-size:12px">${l.email}</td>
-          <td>${l.name||''} ${l.last_name||''}</td>
+          <td style="font-family:var(--font-mono);font-size:12px">${esc(l.email)}</td>
+          <td>${esc(l.name||'')} ${esc(l.last_name||'')}</td>
+          <td>${intentBadge(l.intent)}</td>
           <td style="color:var(--text-dim)">${fmt(l.responded_at)}</td>
-          <td><span class="badge badge-cyan">${l.list_name}</span></td>
         </tr>`).join('')}
       </tbody>
     </table></div>`;
@@ -1769,8 +2347,9 @@
   async function triggerWorkflow() {
     showAlert('workflowStatus', 'Triggering workflow…', 'info');
     try {
-      const r = await fetch('/api/trigger-workflow', { method: 'POST',
-        headers: {'Content-Type': 'application/json'} });
+      const r = await fetch(`${BASE}/api/trigger-workflow`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}
+      });
       const d = await r.json();
       r.ok
         ? showAlert('workflowStatus', '✓ Workflow triggered! Check Recent Runs shortly.', 'success')
@@ -1785,7 +2364,7 @@
     const c = document.getElementById('workflowRunsContainer');
     c.innerHTML = '<div class="skeleton" style="margin-bottom:8px"></div><div class="skeleton" style="width:70%"></div>';
     try {
-      const r = await fetch('/api/workflow-runs');
+      const r = await fetch(`${BASE}/api/workflow-runs`);
       if (!r.ok) { c.innerHTML = '<p style="color:var(--text-mute)">Could not load runs.</p>'; return; }
       const d = await r.json();
       renderWorkflowRuns(d.runs || []);
@@ -1801,22 +2380,639 @@
       return;
     }
     c.innerHTML = runs.map(r => {
-      const badge = r.status === 'completed'
+      const b = r.status === 'completed'
         ? (r.conclusion === 'success' ? 'badge-green' : 'badge-red')
         : 'badge-amber';
-      const label = r.conclusion || r.status;
       return `<div class="workflow-run">
         <span class="run-id">#${r.id}</span>
         <span class="run-time">${fmt(r.created_at)}</span>
-        <span class="badge ${badge}">${label}</span>
+        <span class="badge ${b}">${r.conclusion || r.status}</span>
       </div>`;
     }).join('');
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     REPLIES & PILOTS TAB
+  ═══════════════════════════════════════════════════════════ */
+
+  // Sub-tab switching
+  document.querySelectorAll('.reply-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.reply-tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.reply-tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      const panel = document.getElementById('rtab-' + btn.dataset.rtab);
+      if (panel) panel.classList.add('active');
+      // Lazy load on first click
+      const tab = btn.dataset.rtab;
+      if (tab === 'inbound')  loadReplies();
+      if (tab === 'pilots')   loadPilots();
+      if (tab === 'tickets')  loadTickets();
+      if (tab === 'audit')    loadAudit();
+      if (tab === 'manual')   loadGmailAccountsForManual();
+    });
+  });
+
+  // Stats
+  async function loadReplyStats() {
+    try {
+      const [statsR, ticketsR] = await Promise.all([
+        fetch(`${BASE}/api/pilots/stats`),
+        fetch(`${BASE}/api/ops-tickets?status=open`)
+      ]);
+      const stats   = await statsR.json();
+      const tickets = await ticketsR.json();
+
+      if (stats.ok) {
+        const s = stats.stats;
+        document.getElementById('rs-total').textContent   = s.replies_total ?? '—';
+        document.getElementById('rs-pilots').textContent  = s.pilots_total  ?? '—';
+        document.getElementById('rs-active').textContent  = s.pilots_active ?? '—';
+        document.getElementById('rs-unsubs').textContent  = s.unsubscribes  ?? '—';
+      }
+      if (tickets.ok) {
+        const allOpen     = tickets.tickets || [];
+        const crmPending  = allOpen.filter(t => t.intent === 'YES_CRM_PENDING').length;
+        const crmReceived = allOpen.filter(t => t.intent === 'CRM_REPLY_RECEIVED').length;
+
+        document.getElementById('rs-tickets').textContent    = allOpen.length;
+        document.getElementById('rs-crm-pending').textContent  = crmPending;
+        document.getElementById('rs-crm-received').textContent = crmReceived;
+
+        // Nav badge: highlight when admin has CRM replies waiting for action
+        const badge = document.getElementById('awaiting-setup-badge');
+        if (badge) {
+          badge.textContent   = crmReceived;
+          badge.style.display = crmReceived > 0 ? 'inline-flex' : 'none';
+          badge.style.background = 'rgba(168,85,247,0.9)';
+        }
+      }
+    } catch(e) { console.error('reply stats error', e); }
+  }
+
+  // Inbound replies — see loadReplies() defined below with awaiting-setup support
+
+  document.getElementById('filter-intent').addEventListener('change', loadReplies);
+
+  // ── Inbound replies ───────────────────────────────────────────────────────
+  async function loadReplies() {
+    const tbody  = document.getElementById('replies-tbody');
+    const intent = document.getElementById('filter-intent').value;
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-mute);padding:20px">Loading…</td></tr>';
+    try {
+      let url = `${BASE}/api/processed-replies?limit=100`;
+      if (intent) url += '&intent=' + encodeURIComponent(intent);
+      const r = await fetch(url);
+      const d = await r.json();
+      if (!d.ok || !d.replies.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-mute);padding:24px">No replies yet. They appear here once contractors start responding to your outreach.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = d.replies.map((row) => {
+        const isYes = row.intent === 'YES_WITH_URL' || row.intent === 'YES_NO_URL';
+        const isCrmReply = row.intent === 'CRM_REPLY';
+
+        const theirText = row.raw_reply || '';
+        const theirCell = theirText
+          ? `<div class="reply-bubble their-bubble" onclick="this.classList.toggle('expanded')" title="Click to expand">${esc(theirText)}</div>
+             ${row.reasoning ? `<span class="reasoning-tag">🧠 ${esc(row.reasoning)}</span>` : ''}`
+          : '<span style="color:var(--text-mute);font-size:11px">—</span>';
+
+        const ourText = row.auto_reply_body || '';
+        const ourCell = ourText
+          ? `<div class="reply-bubble our-bubble" onclick="this.classList.toggle('expanded')" title="Click to expand">${esc(ourText)}</div>`
+          : '<span style="color:var(--text-mute);font-size:11px">—</span>';
+
+        const actionCell = isYes
+          ? `<button class="btn btn-sm btn-primary" style="font-size:9px;padding:4px 10px"
+               onclick="confirmPilot('${esc(row.from_email)}', '${esc(row.account_email)}')">
+               ✓ Confirm Pilot
+             </button>`
+          : isCrmReply
+          ? `<span class="badge" style="background:rgba(168,85,247,.15);color:#c084fc;border:1px solid rgba(168,85,247,.3);font-size:9px">
+               📋 Act manually
+             </span>`
+          : '<span style="color:var(--text-mute);font-size:11px">—</span>';
+
+        return `
+          <tr>
+            <td style="font-family:var(--font-mono);font-size:12px">${esc(row.from_email)}</td>
+            <td>${intentBadge(row.intent)}</td>
+            <td class="reply-preview-cell">${theirCell}</td>
+            <td class="reply-preview-cell">${ourCell}</td>
+            <td style="text-align:center">${row.auto_reply_sent
+              ? '<span style="color:var(--neon);font-size:16px">✓</span>'
+              : '<span style="color:var(--pink);font-size:16px">✗</span>'}</td>
+            <td style="font-size:11px;color:var(--text-dim)">${esc(row.account_email)}</td>
+            <td style="font-size:11px;color:var(--text-dim);white-space:nowrap">${fmt(row.processed_at)}</td>
+            <td style="white-space:nowrap">${actionCell}</td>
+          </tr>`;
+      }).join('');
+    } catch(e) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--pink);padding:20px">Error loading replies.</td></tr>';
+    }
+  }
+
+  async function confirmPilot(fromEmail, gmailAccount) {
+    if (!confirm(`Confirm pilot for ${fromEmail}?\n\nThis will create a pilot record. You can set the service details in the Pilots tab.`)) return;
+    try {
+      const r = await fetch(`${BASE}/api/confirm-pilot`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ agent_email: fromEmail, gmail_account: gmailAccount })
+      });
+      const d = await r.json();
+      if (d.ok) {
+        alert(`✓ Pilot confirmed for ${fromEmail}. Update the service details in the Pilots tab.`);
+        loadReplyStats();
+        loadReplies();
+      } else {
+        alert(`Error: ${d.error || 'Failed to confirm pilot'}`);
+      }
+    } catch(e) {
+      alert('Network error: ' + e.message);
+    }
+  }
+
+  // Pilots
+  async function loadPilots() {
+    const tbody  = document.getElementById('pilots-tbody');
+    const status = document.getElementById('filter-pilot-status').value;
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-mute);padding:20px">Loading…</td></tr>';
+    try {
+      let url = `${BASE}/api/pilots`;
+      if (status) url += '?status=' + encodeURIComponent(status);
+      const r = await fetch(url);
+      const d = await r.json();
+      if (!d.ok || !d.pilots.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-mute);padding:24px">No pilots yet. They are created automatically when contractors reply with a service URL.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = d.pilots.map(p => `
+        <tr>
+          <td style="font-family:var(--font-mono);font-size:12px">${esc(p.agent_email)}</td>
+          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px"
+              title="${esc(p.address)}">${esc(p.address || '—')}</td>
+          <td>${pilotBadge(p.status)}</td>
+          <td style="text-align:center;font-family:var(--font-head);font-weight:700;color:var(--neon)">${p.inbound_count ?? 0}</td>
+          <td style="text-align:center;font-family:var(--font-head);font-weight:700;color:var(--cyan)">${p.bookings_confirmed ?? 0}</td>
+          <td style="font-size:11px;color:var(--text-dim)">${esc(p.assigned_account || '—')}</td>
+          <td style="font-size:11px;color:var(--text-dim);white-space:nowrap">${fmt(p.created_at)}</td>
+          <td>
+            <select onchange="updatePilotStatus(${p.id}, this.value)"
+              style="background:var(--bg3);border:1px solid var(--border);color:var(--text);
+                     padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;width:auto">
+              ${['pending_setup','active','running','completed','reported','converted']
+                  .map(s => `<option value="${s}" ${s===p.status?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}
+            </select>
+          </td>
+        </tr>
+      `).join('');
+    } catch(e) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--pink);padding:20px">Error loading pilots.</td></tr>';
+    }
+  }
+
+  async function updatePilotStatus(id, status) {
+    try {
+      await fetch(`${BASE}/api/pilots/${id}`, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ status })
+      });
+      loadReplyStats();
+    } catch(e) { console.error(e); }
+  }
+
+  document.getElementById('filter-pilot-status').addEventListener('change', loadPilots);
+
+  // Ops Tickets
+  async function loadTickets() {
+    const tbody  = document.getElementById('tickets-tbody');
+    const status = document.getElementById('filter-ticket-status').value || 'open';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:20px">Loading…</td></tr>';
+    try {
+      const r = await fetch(`${BASE}/api/ops-tickets?status=${encodeURIComponent(status)}`);
+      const d = await r.json();
+      if (!d.ok || !d.tickets.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:24px">No tickets with this status.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = d.tickets.map(t => `
+        <tr>
+          <td style="font-family:var(--font-mono);font-size:12px">${esc(t.from_email)}</td>
+          <td style="font-size:12px">${esc(t.subject || '(no subject)')}</td>
+          <td>${intentBadge(t.intent)}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                     font-size:11px;color:var(--text-dim)" title="${esc(t.raw_body)}">${esc((t.raw_body||'').slice(0,80))}</td>
+          <td><span class="badge badge-${t.status}">${t.status}</span></td>
+          <td style="white-space:nowrap">
+            ${t.status === 'open' ? `
+              <button class="btn btn-ghost btn-sm" style="margin-right:4px" onclick="resolveTicket(${t.id})">✓ Resolve</button>
+              <button class="btn btn-sm" style="background:rgba(255,45,107,.12);color:var(--pink);border:1px solid rgba(255,45,107,.25)"
+                      onclick="spamTicket(${t.id})">Spam</button>
+            ` : '<span style="color:var(--text-mute);font-size:11px">—</span>'}
+          </td>
+        </tr>
+      `).join('');
+    } catch(e) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--pink);padding:20px">Error loading tickets.</td></tr>';
+    }
+  }
+
+  async function resolveTicket(id) {
+    await fetch(`${BASE}/api/ops-tickets/${id}/resolve`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ resolved_by: 'admin' })
+    });
+    loadTickets(); loadReplyStats();
+  }
+
+  async function spamTicket(id) {
+    await fetch(`${BASE}/api/ops-tickets/${id}/spam`, { method: 'POST' });
+    loadTickets(); loadReplyStats();
+  }
+
+  document.getElementById('filter-ticket-status').addEventListener('change', loadTickets);
+
+  // Audit Log
+  async function loadAudit() {
+    const tbody = document.getElementById('audit-tbody');
+    const event = document.getElementById('filter-audit-event').value;
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-mute);padding:20px">Loading…</td></tr>';
+    try {
+      let url = `${BASE}/api/reply-audit?limit=100`;
+      if (event) url += '&event_type=' + encodeURIComponent(event);
+      const r = await fetch(url);
+      const d = await r.json();
+      if (!d.ok || !d.logs.length) {
+        tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-mute);padding:24px">No log entries yet.</td></tr>';
+        return;
+      }
+      const eventColour = e =>
+        e.includes('SENT') ? 'badge-YES_WITH_URL'
+        : e.includes('FAILED') ? 'badge-PASS_UNSUB'
+        : e.includes('PILOT') ? 'badge-YES_NO_URL'
+        : e === 'UNSUBSCRIBED' ? 'badge-PASS_UNSUB'
+        : 'badge-UNKNOWN';
+
+      tbody.innerHTML = d.logs.map(l => `
+        <tr>
+          <td><span class="badge ${eventColour(l.event_type)}">${esc(l.event_type).replace(/_/g,' ')}</span></td>
+          <td style="font-size:11px;color:var(--text-dim);max-width:340px;
+                     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono)"
+              title="${esc(JSON.stringify(l.data))}">${esc(JSON.stringify(l.data).slice(0,110))}</td>
+          <td style="font-size:11px;color:var(--text-dim);white-space:nowrap">${fmt(l.created_at)}</td>
+        </tr>
+      `).join('');
+    } catch(e) {
+      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--pink);padding:20px">Error.</td></tr>';
+    }
+  }
+
+  document.getElementById('filter-audit-event').addEventListener('change', loadAudit);
+
+  // Manual Reply — pre-approved templates
+  const REPLY_TEMPLATES = {
+    YES_WITH_URL:   "Sounds good — quick question before I get everything set up.\n\nWhich CRM do you use to manage your leads? (Follow Up Boss, KvCore, HubSpot, Salesforce, etc.)",
+    YES_NO_URL:     "Sounds good — quick question before I get everything set up.\n\nWhich CRM do you use to manage your leads? (Follow Up Boss, KvCore, HubSpot, Salesforce, etc.)",
+    CRM_REPLY:      "",
+    FORWARDED_LEAD: "Got it — I received the forwarded lead. I'll reply in your voice and report back with the response & any confirmations. Expect the first result shortly.",
+    ASKS_PRICE:     "Short answer — the pilot is completely free for 14 days. If you don't get at least 2 qualified jobs booked automatically, you owe nothing and keep the setup.\n\nReply PRICE if you want plan details after the pilot.",
+    ASKS_DETAILS:   "Good question — zero setup on your end, I handle everything.\n\nIt qualifies inbound inquiries automatically and books confirmed jobs, ensuring you have backup coverage without lifting a finger. 14-day free pilot, 2 qualified bookings guaranteed or you owe nothing.\n\nReply SETUP to start, or TECH for a one-paragraph technical breakdown.",
+    PASS_UNSUB:          "Understood — you're unsubscribed. If you change your mind any time, reply START and I'll re-open a slot.",
+    NEGATIVE_OBJECTION:  "I apologize for the confusion — I clearly had incorrect information. I'll correct my records right away and won't bother you again.",
+    UNKNOWN:             "Thanks — got your message. I'll manually review and get back to you within 24 hours.",
+  };
+
+  document.querySelectorAll('.tmpl-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tmpl = REPLY_TEMPLATES[btn.dataset.tmpl];
+      if (tmpl) document.getElementById('manual-body').value = tmpl;
+    });
+  });
+
+  async function loadGmailAccountsForManual() {
+    try {
+      const r   = await fetch(`${BASE}/api/smtp-accounts`);
+      const d   = await r.json();
+      const sel = document.getElementById('manual-account');
+      while (sel.options.length > 1) sel.remove(1);
+      (d.accounts || []).forEach(a => {
+        const opt = document.createElement('option');
+        opt.value       = a.email;
+        opt.textContent = `${a.display_name} <${a.email}>`;
+        sel.appendChild(opt);
+      });
+    } catch(e) { console.error(e); }
+  }
+
+  async function sendManualReply() {
+    const to      = document.getElementById('manual-to').value.trim();
+    const subject = document.getElementById('manual-subject').value.trim();
+    const body    = document.getElementById('manual-body').value.trim();
+    const account = document.getElementById('manual-account').value;
+    const statusEl = document.getElementById('manual-reply-status');
+
+    if (!to || !body) {
+      statusEl.innerHTML = '<div class="alert alert-error">To and Body are required.</div>';
+      return;
+    }
+
+    statusEl.innerHTML = '<div class="alert alert-info">Sending…</div>';
+
+    try {
+      const r = await fetch(`${BASE}/api/manual-reply`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ to_email: to, subject, body, gmail_account: account || undefined })
+      });
+      const d = await r.json();
+      if (d.ok) {
+        statusEl.innerHTML = '<div class="alert alert-success">✓ Reply sent successfully.</div>';
+        document.getElementById('manual-to').value      = '';
+        document.getElementById('manual-subject').value = '';
+        document.getElementById('manual-body').value    = '';
+        loadAudit();
+      } else {
+        statusEl.innerHTML = `<div class="alert alert-error">✗ ${d.error || 'Failed'}</div>`;
+      }
+    } catch(e) {
+      statusEl.innerHTML = `<div class="alert alert-error">✗ Network error: ${e.message}</div>`;
+    }
+  }
+
+  /* ═══════════════════════════════════════════
+     NOTIFICATIONS
+  ═══════════════════════════════════════════ */
+  async function sendCustomNotification() {
+    const title    = document.getElementById('ntfy-title').value.trim()    || 'Test';
+    const message  = document.getElementById('ntfy-message').value.trim()  || 'Hello';
+    const priority = document.getElementById('ntfy-priority').value;
+    const statusEl = document.getElementById('ntfy-custom-status');
+    statusEl.innerHTML = `<div class="alert alert-info">Sending…</div>`;
+    try {
+      const r = await fetch(`${BASE}/api/notify/test`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ title, message, priority, tags: 'loudspeaker' })
+      });
+      const d = await r.json();
+      if (r.ok && d.ok) {
+        statusEl.innerHTML = `<div class="alert alert-success">✓ Sent! Check your phone.</div>`;
+      } else {
+        statusEl.innerHTML = `<div class="alert alert-error">✗ ${d.error || 'Failed — is NTFY_TOPIC set in .env?'}</div>`;
+      }
+    } catch(e) {
+      statusEl.innerHTML = `<div class="alert alert-error">✗ ${e.message}</div>`;
+    }
+  }
+
+  async function testSingleEvent(key) {
+    const statusEl = document.getElementById('ntfy-test-status');
+    statusEl.innerHTML = `<div class="alert alert-info">Firing <strong>${key}</strong>…</div>`;
+    try {
+      const r = await fetch(`${BASE}/api/notify/test-event`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ event: key })
+      });
+      const d = await r.json();
+      if (r.ok && d.ok) {
+        statusEl.innerHTML = `<div class="alert alert-success">✓ <strong>${key}</strong> fired — check your phone.</div>`;
+      } else {
+        statusEl.innerHTML = `<div class="alert alert-error">✗ ${d.error || 'Failed — is NTFY_TOPIC set in .env?'}</div>`;
+      }
+    } catch(e) {
+      statusEl.innerHTML = `<div class="alert alert-error">✗ ${e.message}</div>`;
+    }
+  }
+
+  // Fires a list of event keys one by one with a 1s gap between each (all client-side)
+  async function _fireEventSequence(keys, statusEl) {
+    let fired = 0;
+    for (const key of keys) {
+      statusEl.innerHTML = `<div class="alert alert-info">Firing <strong>${key}</strong> (${fired + 1}/${keys.length})…</div>`;
+      try {
+        const r = await fetch(`${BASE}/api/notify/test-event`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ event: key })
+        });
+        const d = await r.json();
+        if (!r.ok || !d.ok) {
+          statusEl.innerHTML = `<div class="alert alert-error">✗ Failed on <strong>${key}</strong>: ${d.error || 'unknown error'}</div>`;
+          return;
+        }
+        fired++;
+      } catch(e) {
+        statusEl.innerHTML = `<div class="alert alert-error">✗ Network error on <strong>${key}</strong>: ${e.message}</div>`;
+        return;
+      }
+      // 1s gap between notifications so phone shows each as a separate banner
+      if (fired < keys.length) await new Promise(res => setTimeout(res, 1000));
+    }
+    statusEl.innerHTML = `<div class="alert alert-success">✓ All ${fired} notifications fired. Check your phone!</div>`;
+  }
+
+  async function testAllEvents() {
+    const keys = [
+      'pilot_created','yes_no_url','forwarded_lead','negative','auto_reply_failed',
+      'asks_price','asks_details','unsubscribe','run_complete',
+      'campaign_queued','manual_reply_sent','ticket_resolved','batch_done','send_limit'
+    ];
+    const statusEl = document.getElementById('ntfy-test-status');
+    await _fireEventSequence(keys, statusEl);
+  }
+
+  async function testAllHighPriority() {
+    const keys = ['pilot_created','yes_no_url','forwarded_lead','negative','auto_reply_failed','send_limit'];
+    const statusEl = document.getElementById('ntfy-test-status');
+    await _fireEventSequence(keys, statusEl);
+  }
+
+  /* ═══════════════════════════════════════════
+     CAMPAIGN AI DIAGNOSIS
+  ═══════════════════════════════════════════ */
+  let diagCampaigns = [];
+
+  async function loadDiagnosisCampaigns() {
+    const container = document.getElementById('diag-campaign-list');
+    container.innerHTML = '<div class="skeleton" style="height:60px;margin-bottom:12px"></div><div class="skeleton" style="height:60px;width:80%"></div>';
+    try {
+      const r = await fetch(`${BASE}/api/campaigns`);
+      const d = await r.json();
+      diagCampaigns = d.campaigns || [];
+      if (!diagCampaigns.length) {
+        container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📭</div><p>No campaigns found. Create one first.</p></div>`;
+        return;
+      }
+      container.innerHTML = diagCampaigns.map(c => `
+        <div class="card" id="diag-card-${c.id}" style="margin-bottom:16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+            <div>
+              <div style="font-family:var(--font-head);font-size:15px;font-weight:700;color:var(--text);letter-spacing:.03em">${esc(c.name)}</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:3px">
+                List: <strong>${esc(c.list_name)}</strong> &nbsp;·&nbsp; Created: ${fmt(c.created_at)}
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-sm" onclick="loadCampaignStats(${c.id})">↻ Load Stats</button>
+              <button class="btn btn-outline btn-sm" id="diag-btn-${c.id}" onclick="runDiagnosis(${c.id})" disabled>🤖 Analyze</button>
+            </div>
+          </div>
+          <div id="diag-stats-${c.id}" style="display:none;margin-top:16px">
+            <div class="stat-grid" id="diag-statgrid-${c.id}"></div>
+          </div>
+          <div id="diag-output-${c.id}" style="margin-top:12px"></div>
+        </div>
+      `).join('');
+    } catch(e) {
+      container.innerHTML = `<div class="alert alert-error">Failed to load campaigns: ${esc(e.message)}</div>`;
+    }
+  }
+
+  async function loadCampaignStats(campaignId) {
+    const statsWrap = document.getElementById(`diag-stats-${campaignId}`);
+    const statGrid  = document.getElementById(`diag-statgrid-${campaignId}`);
+    const analyzeBtn = document.getElementById(`diag-btn-${campaignId}`);
+    statsWrap.style.display = 'block';
+    statGrid.innerHTML = '<div class="skeleton" style="height:80px"></div>';
+
+    try {
+      const r = await fetch(`${BASE}/api/campaigns/${campaignId}/stats`);
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'API error');
+
+      const s = d.stats;
+      const sendRate = s.total_queued > 0 ? Math.round(s.total_sent / s.total_queued * 100) : 0;
+      const clickRate = s.total_sent > 0 ? (s.unique_clickers / s.total_sent * 100).toFixed(1) : '0.0';
+      const replyRate = s.total_sent > 0 ? (s.total_responses / s.total_sent * 100).toFixed(1) : '0.0';
+
+      // Colour helpers
+      const sendCol  = sendRate >= 80 ? 'var(--neon)' : sendRate >= 40 ? 'var(--amber)' : 'var(--pink)';
+      const clickCol = parseFloat(clickRate) >= 3 ? 'var(--neon)' : parseFloat(clickRate) >= 1 ? 'var(--amber)' : 'var(--pink)';
+      const repCol   = parseFloat(replyRate) >= 2 ? 'var(--neon)' : parseFloat(replyRate) >= 0.5 ? 'var(--amber)' : 'var(--pink)';
+
+      statGrid.innerHTML = `
+        <div class="stat-card">
+          <div class="stat-label">Queued</div>
+          <div class="stat-value" style="font-size:26px">${s.total_queued}</div>
+          <div class="stat-sub">${s.unique_leads} unique leads</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Sent</div>
+          <div class="stat-value" style="font-size:26px;color:${sendCol}">${s.total_sent}</div>
+          <div class="stat-sub">${sendRate}% delivery rate</div>
+          <div class="progress-bar" style="margin-top:8px"><div class="progress-fill ${sendRate>=80?'good':sendRate>=40?'warn':'danger'}" style="width:${sendRate}%"></div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Pending</div>
+          <div class="stat-value" style="font-size:26px;color:var(--text-dim)">${s.total_pending}</div>
+          <div class="stat-sub">not yet sent</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Link Clicks</div>
+          <div class="stat-value" style="font-size:26px;color:${clickCol}">${s.total_clicks}</div>
+          <div class="stat-sub">${s.unique_clickers} unique · ${clickRate}% CTR</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Replies</div>
+          <div class="stat-value" style="font-size:26px;color:${repCol}">${s.total_responses}</div>
+          <div class="stat-sub">${replyRate}% reply rate</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Follow-ups</div>
+          <div class="stat-value" style="font-size:26px">${d.follow_ups.length}</div>
+          <div class="stat-sub">${Object.keys(s.by_sequence).length} sequences total</div>
+        </div>
+      `;
+
+      // Sequence breakdown
+      const seqKeys = Object.keys(s.by_sequence).sort((a,b)=>a-b);
+      if (seqKeys.length > 1) {
+        const seqRows = seqKeys.map(seq => {
+          const sq = s.by_sequence[seq];
+          const pct = sq.queued > 0 ? Math.round(sq.sent/sq.queued*100) : 0;
+          return `<tr>
+            <td>${seq === '0' ? 'Initial' : `Follow-up #${seq}`}</td>
+            <td>${sq.queued}</td>
+            <td>${sq.sent}</td>
+            <td>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div class="progress-bar" style="width:80px;margin:0"><div class="progress-fill ${pct>=80?'good':pct>=40?'warn':'danger'}" style="width:${pct}%"></div></div>
+                <span style="font-size:11px;color:var(--text-dim)">${pct}%</span>
+              </div>
+            </td>
+          </tr>`;
+        }).join('');
+        statGrid.insertAdjacentHTML('afterend', `
+          <div style="margin-top:16px">
+            <div style="font-family:var(--font-head);font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);margin-bottom:8px">Sequence Breakdown</div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Sequence</th><th>Queued</th><th>Sent</th><th>Delivery</th></tr></thead>
+              <tbody>${seqRows}</tbody>
+            </table></div>
+          </div>
+        `);
+      }
+
+      // Enable the analyze button and store data
+      analyzeBtn.disabled = false;
+      analyzeBtn.dataset.statsJson = JSON.stringify({ campaign: d.campaign, follow_ups: d.follow_ups, stats: s });
+    } catch(e) {
+      statGrid.innerHTML = `<div class="alert alert-error">Failed to load stats: ${esc(e.message)}</div>`;
+    }
+  }
+
+  async function runDiagnosis(campaignId) {
+    const btn    = document.getElementById(`diag-btn-${campaignId}`);
+    const output = document.getElementById(`diag-output-${campaignId}`);
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Analyzing…';
+    output.innerHTML = `<div class="alert alert-info" style="margin-top:8px">Querying database &amp; running AI diagnosis — usually takes 3–5 seconds…</div>`;
+
+    try {
+      const r = await fetch(`${BASE}/api/campaigns/${campaignId}/diagnose`, { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || d.detail || 'Server error');
+
+      const text     = d.diagnosis || '';
+      const rendered = text
+        .replace(/### (.*)/g, '<h4 style="font-family:var(--font-head);font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--neon);margin:20px 0 10px;border-bottom:1px solid var(--border);padding-bottom:6px">$1</h4>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong style="color:var(--text)">$1</strong>')
+        .replace(/^(\d+)\. /gm, '<span style="color:var(--neon);font-weight:700">$1.</span> ')
+        .replace(/^[▸\-] /gm, '<span style="color:var(--text-dim)">▸</span> ')
+        .replace(/\n/g, '<br>');
+
+      output.innerHTML = `
+        <div style="background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:var(--radius-lg);
+                    padding:20px 24px;margin-top:12px;line-height:1.7;font-size:13px;color:var(--text-dim)">
+          <div style="font-family:var(--font-head);font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+                      color:var(--text-mute);margin-bottom:12px">
+            AI Diagnosis — ${new Date().toLocaleString()} · Groq / LLaMA 3.3 70B
+          </div>
+          ${rendered}
+        </div>`;
+    } catch(e) {
+      output.innerHTML = `<div class="alert alert-error">Diagnosis failed: ${esc(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🤖 Re-Analyze';
+    }
   }
 
   /* ═══════════════════════════════════════════
      INIT
   ═══════════════════════════════════════════ */
   loadLists();
+  checkOAuthResult();
+  loadReplyStats();
+  // Refresh reply stats + badge every 60s
+  setInterval(loadReplyStats, 60_000);
 </script>
+
 </body>
 </html>
