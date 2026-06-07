@@ -848,7 +848,7 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         auto_reply_sent = True
 
     # Determine if product was introduced in this reply
-    pitched = (intent in ['INTERESTED', 'ASKS_PRICE', 'ASKS_DETAILS']) or (conversation_state['product_introduced'])
+    pitched = (intent in ['INTERESTED', 'ASKS_PRICE', 'ASKS_DETAILS']) or (lead.get('product_introduced', False))
     _update_lead_state(lead['id'], intent, product_introduced=pitched, belief_variant=variant_tag)
 
     _mark_processed(
@@ -1360,7 +1360,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         auto_reply_sent = True # Marked as "sent" in terms of processed_replies because it's enqueued
 
     # Determine if product was introduced in this reply
-    pitched = (intent in ['INTERESTED', 'ASKS_PRICE', 'ASKS_DETAILS']) or (conversation_state['product_introduced'])
+    pitched = (intent in ['INTERESTED', 'ASKS_PRICE', 'ASKS_DETAILS']) or (lead.get('product_introduced', False))
 
     _update_lead_state(lead['id'], intent, product_introduced=pitched, belief_variant=variant_tag)
 
