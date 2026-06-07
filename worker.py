@@ -20,8 +20,8 @@
 #
 # REQUIRED DB CHANGE (run once in Supabase SQL editor):
 #   ALTER TABLE lead_campaign_accounts
-#     ADD COLUMN IF NOT EXISTS smtp_account TEXT,
-#     ADD COLUMN IF NOT EXISTS sender_type  TEXT DEFAULT 'gmail';
+#     ADD COLUMN IF NOT EXISTS account_email TEXT,
+#     ADD COLUMN IF NOT EXISTS sender_type TEXT DEFAULT 'gmail';
 #
 # THROTTLING (actually works with GitHub Actions cron):
 #   - MAX_EMAILS_PER_RUN   : hard cap per worker invocation (default 50)
@@ -735,9 +735,7 @@ def send_queued():
                     html_body   = tracked_body,
                     thread_id   = q.get("thread_id"),
                     in_reply_to = q.get("in_reply_to"),
-                    references  = q.get("references"),
-                    queue_id    = q["id"],
-                    retry_count = attempt
+                    references  = q.get("references")
                 )
 
             if ok:
