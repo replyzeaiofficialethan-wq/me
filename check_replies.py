@@ -1015,7 +1015,7 @@ def _store_responded_lead(lead_id: int, email: str, intent: str, raw_reply: str)
     try:
         supabase.table("responded_leads").insert({
             "email":        email,
-            "lead_id":      lead_id,
+            "original_lead_id": lead_id,
             "intent":       intent,
             "raw_reply":    raw_reply[:1000],
             "responded_at": datetime.now(timezone.utc).isoformat(),
