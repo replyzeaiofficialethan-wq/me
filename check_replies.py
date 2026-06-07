@@ -1013,7 +1013,7 @@ def _create_human_review_ticket(from_email: str, subject: str, raw_body: str,
 
 def _store_responded_lead(lead_id: int, email: str, intent: str, raw_reply: str):
     try:
-        supabase.table("responded_leads").upsert({
+        supabase.table("responded_leads").insert({
             "email":        email,
             "lead_id":      lead_id,
             "intent":       intent,
