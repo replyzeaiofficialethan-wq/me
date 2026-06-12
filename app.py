@@ -848,6 +848,8 @@ def api_import_leads():
             # company / business name (maps to brokerage for backward compat)
             "company": "company", "company name": "company", "company_name": "company",
             "business": "company", "business name": "company",
+            # brokerage (real estate)
+            "brokerage": "brokerage",
             # phone
             "phone": "phone", "telephone": "phone", "phone number": "phone",
             # service type (HVAC, plumbing, locksmith, etc.)
@@ -864,12 +866,35 @@ def api_import_leads():
             "service area": "service_area", "service_area": "service_area",
             # custom notes
             "notes": "notes", "custom notes": "notes", "comments": "notes",
+            # real estate specific fields
+            "rating": "rating",
+            "review_count": "review_count",
+            "review count": "review_count",
+            "reviews": "review_count",
+            "years of experience": "years_experience",
+            "years_experience": "years_experience",
+            "years experience": "years_experience",
+            "experience": "years_experience",
+            "last 12m sales": "last_12m_sales",
+            "last 12 months sales": "last_12m_sales",
+            "sales": "last_12m_sales",
+            "annual sales": "last_12m_sales",
+            "active listings": "active_listings",
+            "active_listings": "active_listings",
+            "listings": "active_listings",
+            "open house": "open_house",
+            "open_house": "open_house",
+            "last sale": "last_sale",
+            "last_sale": "last_sale",
+            "recent sale": "last_sale",
         }
 
         # Standard fields to extract
         STANDARD_FIELDS = {
-            "email", "name", "last name", "city", "company", "phone",
+            "email", "name", "last name", "city", "company", "phone", "brokerage",
             "service", "address", "state", "zip", "ai hooks", "service_area", "notes",
+            "rating", "review_count", "years_experience", "last_12m_sales",
+            "active_listings", "open_house", "last_sale",
         }
 
         leads_by_email = {}
@@ -893,26 +918,33 @@ def api_import_leads():
                 continue
 
             leads_by_email[email] = {
-                "email":            email,
-                "name":             cleaned.get("name", ""),
-                "last_name":        cleaned.get("last name", ""),
-                "company":          cleaned.get("company", ""),
-                "phone":            cleaned.get("phone", ""),
-                "city":             cleaned.get("city", ""),
-                "state":            cleaned.get("state", ""),
-                "zip":              cleaned.get("zip", ""),
-                "service":          cleaned.get("service", ""),
-                "address":          cleaned.get("address", ""),
-                "ai_hooks":         cleaned.get("ai hooks", ""),
-                "service_area":     cleaned.get("service_area", ""),
-                "notes":            cleaned.get("notes", ""),
-                "list_name":        list_name,
+                "email":              email,
+                "name":               cleaned.get("name", ""),
+                "last_name":          cleaned.get("last name", ""),
+                "company":            cleaned.get("company", ""),
+                "brokerage":          cleaned.get("brokerage", ""),
+                "phone":              cleaned.get("phone", ""),
+                "city":               cleaned.get("city", ""),
+                "state":              cleaned.get("state", ""),
+                "zip":                cleaned.get("zip", ""),
+                "service":            cleaned.get("service", ""),
+                "address":            cleaned.get("address", ""),
+                "ai_hooks":           cleaned.get("ai hooks", ""),
+                "service_area":       cleaned.get("service_area", ""),
+                "notes":              cleaned.get("notes", ""),
+                "list_name":          list_name,
+                # Real estate specific fields
+                "rating":             cleaned.get("rating", ""),
+                "review_count":       cleaned.get("review_count", ""),
+                "years_experience":   cleaned.get("years_experience", ""),
+                "last_12m_sales":     cleaned.get("last_12m_sales", ""),
+                "active_listings":    cleaned.get("active_listings", ""),
+                "open_house":         cleaned.get("open_house", ""),
+                "last_sale":          cleaned.get("last_sale", ""),
                 # Backward compatibility aliases
-                "brokerage":        cleaned.get("company", ""),
-                "street":           cleaned.get("address", ""),
-                "open_house":       cleaned.get("service_area", ""),
-                "custom_fields":    {k: v for k, v in cleaned.items()
-                                     if k not in STANDARD_FIELDS},
+                "street":             cleaned.get("address", ""),
+                "custom_fields":      {k: v for k, v in cleaned.items()
+                                      if k not in STANDARD_FIELDS},
             }
 
         leads = list(leads_by_email.values())
