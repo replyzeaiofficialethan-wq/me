@@ -147,7 +147,8 @@ CURRENT GENERATION CONSTRAINTS:
 
 CRITICAL RULES:
 - NEVER MENTION "AI" OR "BOTS". Use "system", "service", "speed-to-lead", "handling inbound while busy", "keeping leads warm", or "covering gaps during showings".
-- MINDSET: Your goal is NOT to close the lead quickly. Keep the conversation feeling natural and ongoing. Focus on the revenue impact of missed client leads. Curiosity and realism matter more than pitching.
+- MINDSET: Your goal is to identify a pain point and move the lead toward a free trial as efficiently as possible without sounding like a corporate bot. Focus on the revenue impact of missed client leads — every missed lead is a potential lost commission.
+- If the lead's tone is positive or neutral AND you spot an opening, make a soft bridge to the service.
 - Do NOT always ask a question.
 - If Ask Follow-up Question is True: You MUST include a short, natural follow-up question.
 - If Ask Follow-up Question is False: You MUST NOT ask any questions. Simply acknowledge, relate, make an observation, and then stop talking.
@@ -161,6 +162,7 @@ CRITICAL RULES:
 - Most replies should be under 2 sentences. Occasionally send a 1-sentence reply.
 - Avoid long explanations unless explicitly asked.
 - Always keep the real estate agent's perspective in mind — this is about revenue, not leads in the abstract.
+- CRITICAL: If belief_signal is BELIEF_HIGH or BELIEF_MEDIUM, you MUST offer the free trial immediately in your reply, regardless of intent label or product_introduced status. Example: "We stopped that leak — run your next 5-10 leads free and see the difference."
 
 TONE & STYLE:
 - Current style mode: {style_mode}
@@ -176,15 +178,15 @@ PREFERRED LANGUAGE:
 - TONE MIRRORING: If they are brief (e.g. "I do"), you must be very brief. If they mention a specific word like "listings" or "leads", acknowledge it.
 
 - CONVERSATIONAL FLOW:
-  FIRST REPLY (if product_introduced is false):
+  FIRST REPLY:
   - Acknowledge their point naturally using the opener or context.
-  - Deepen awareness of the operational issue (e.g. {situation}) and revenue impact.
-  - DO NOT pitch the product yet.
-  - DO NOT ask if they are set on their current setup.
+  - IMMEDIATELY contrast it with the revenue risk of the "lead-leak" (e.g., missing a lead while at a showing).
+  - If the lead's tone is positive or neutral, provide a soft bridge to the service.
+  - Move toward the free trial offer efficiently — every response is an opportunity.
 
-  ONLY AFTER engagement (if product_introduced is true):
-  - explain the service briefly (handling inbound client leads instantly),
-  - tie it to response time and lost deal opportunities,
+  ALWAYS:
+  - Explain the service briefly (handling inbound client leads instantly),
+  - Tie it to response time and lost deal opportunities,
   - CRITICAL: Always end with a direct ask to try it free. Example: "We can run your next 5-10 client leads free so you see if it actually helps."
   - The free trial is the conversion moment. Do NOT skip this.
 
@@ -213,16 +215,22 @@ BELIEF_UNKNOWN : Unclear or off-topic regarding response time beliefs.
 
 REPLY LOGIC:
 - If AGENT_HANDLES:
-  DO NOT immediately pitch the product.
-  Acknowledge that they handle it. Relate to how that works {situation} and the revenue risk.
-  If Ask Follow-up Question is True, ask a simple follow-up like "Do you usually answer those leads immediately or once you're done showing?"
-  Otherwise, just make the observation and stop.
+  Use the CONTRAST BRIDGE approach: Acknowledge their point, then immediately contrast it with the revenue risk of the lead-leak.
+  Example: "Gotcha. Most agents handle it themselves, but the lead-leak still happens during showings. We stopped that. Worth a 2-min look?"
+  If belief_signal is BELIEF_HIGH or BELIEF_MEDIUM, go straight to the free trial offer.
 
 - If ASSISTANT_HANDLES:
   Acknowledge they have help. Mention how {situation} usually still leaves gaps even with support.
+  If belief_signal is BELIEF_HIGH or BELIEF_MEDIUM, offer the free trial immediately.
 
 - If INTERESTED:
   Briefly explain how we help with response time. If someone emails {situation}, they get an instant response until you can jump in.
+  CRITICAL: Always end with a direct ask to try it free.
+
+- If ACKNOWLEDGMENT_ONLY:
+  Use PATTERN INTERRUPT — do not stay silent. Ask a high-leverage curiosity question to keep the lead in the pain-mindset.
+  Example: "Fair enough. Just curious — do you think the first agent to respond usually wins the deal, or do people still shop around?"
+  This re-engages the lead and plants the seed for the revenue impact.
 
 Respond ONLY with valid JSON:
 {{
@@ -486,18 +494,19 @@ def _tmpl_asks_identity(my_name: str, gp: dict) -> str:
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_agent_handles(my_name: str, gp: dict, variant_tag: str = None, chosen_question: str = None) -> str:
+    """Value-First: Contrast Bridge approach — acknowledge, contrast with lead-leak risk, soft close."""
     if variant_tag == "group_a_observation":
-        return f"{gp['opener']} That's pretty common from what I've seen.\n\n— {my_name}"
+        return f"{gp['opener']} Most agents handle it themselves, but the lead-leak still happens {gp['situation']}. We stopped that. Worth a 2-min look?\n\n— {my_name}"
     elif variant_tag == "group_b_belief_question" and chosen_question:
-        return f"{gp['opener']}\n\n{chosen_question}\n\n— {my_name}"
+        return f"{gp['opener']} Most agents handle it themselves, but the lead-leak still happens {gp['situation']}. We stopped that.\n\n{chosen_question}\n\n— {my_name}"
 
     # Default legacy fallback if no variant is specified
     if gp['style_mode'] == 'very_short':
-        return f"{gp['opener']}\n\n— {my_name}"
+        return f"{gp['opener']} Most agents handle it themselves, but the lead-leak still happens {gp['situation']}. We stopped that. Worth a 2-min look?\n\n— {my_name}"
 
-    body = f"{gp['opener']} Most agents I talk to handle replies themselves too — it just gets tough {gp['situation']}."
+    body = f"{gp['opener']} Most agents handle it themselves, but the lead-leak still happens {gp['situation']}. We stopped that."
     if gp['ask_question']:
-        body += "\n\nDo you usually answer those leads immediately or once you're done showing?"
+        body += "\n\nWorth a 2-min look?"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_nobody_handles(my_name: str, gp: dict) -> str:
@@ -518,9 +527,8 @@ def _tmpl_interested(my_name: str, gp: dict) -> str:
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_asks_price(my_name: str, gp: dict) -> str:
-    body = f"{gp['opener']} We usually show you the results first so you can see what you're missing when you're {gp['situation']}."
-    if gp['ask_question']:
-        body += "\n\nHappy to show you a quick example if that helps?"
+    """Assertive Price Pivot — direct value statement, no deflecting."""
+    body = f"{gp['opener']} It depends on your volume, but it usually pays for itself with the first saved lead. Want to see a quick example of how it works for your listings?"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_asks_details(my_name: str, gp: dict) -> str:
@@ -551,6 +559,11 @@ def _tmpl_negative_objection() -> str:
     return (
         "I apologize for the confusion. I'll correct my records right away and won't reach out again."
     )
+
+def _tmpl_acknowledgment_only(my_name: str, gp: dict) -> str:
+    """Pattern Interrupt — re-engage with high-leverage curiosity question."""
+    body = f"{gp['opener']} Fair enough. Just curious — do you think the first agent to respond usually wins the deal, or do people still shop around?"
+    return f"{body}\n\n— {my_name}"
 
 def _tmpl_unknown(my_name: str, gp: dict) -> str:
     return (
@@ -787,7 +800,8 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         })
 
     elif intent == 'ACKNOWLEDGMENT_ONLY':
-        reply_html = None
+        # Pattern Interrupt: re-engage with curiosity question instead of staying silent
+        reply_html = groq_reply or _tmpl_acknowledgment_only(my_name, gp)
         _log_audit('ACKNOWLEDGMENT_ONLY', {
             'from': from_email, 'reasoning': reasoning, 'account': account['email'],
         })
@@ -1289,8 +1303,8 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         })
 
     elif intent == 'ACKNOWLEDGMENT_ONLY':
-        # Brief ack with no action — do NOT reply, let follow-up sequence handle it
-        reply_html = None
+        # Pattern Interrupt: re-engage with curiosity question instead of staying silent
+        reply_html = groq_reply or _tmpl_acknowledgment_only(my_name, gp)
         _log_audit('ACKNOWLEDGMENT_ONLY', {
             "from":      from_email,
             "reasoning": reasoning,
