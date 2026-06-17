@@ -117,127 +117,141 @@ GROQ_KEYS:    list[str] = load_groq_keys()
 _groq_cursor: int       = 0
 
 #── Real Estate Agent Intent Classification ────────────────────────────────────
+# Intents marked as HIGH_NUANCE require LLM-generated replies only (no template fallback)
+HIGH_NUANCE_INTENTS = {'STATUS_TEST', 'AUTHORITY_SIGNAL', 'PAIN_AWARE'}
+
 _GROQ_VALID_INTENTS = {
     'AGENT_HANDLES', 'NOBODY_HANDLES', 'ASSISTANT_HANDLES', 'INTERESTED',
     'ASKS_PRICE', 'ASKS_DETAILS', 'ASKS_IDENTITY', 'ACKNOWLEDGMENT_ONLY',
-    'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'NOT_RELEVANT', 'CONFUSED', 'UNKNOWN'
+    'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'NOT_RELEVANT', 'CONFUSED', 'UNKNOWN',
+    # New Auditor Frame intents
+    'STATUS_TEST', 'AUTHORITY_SIGNAL', 'PAIN_AWARE'
 }
 
-#── System prompt for Real Estate Agent ICP ───────────────────────────────────
+#── System prompt: THE AUDITOR FRAME ─────────────────────────────────────────
 _GROQ_SYSTEM_PROMPT = """
-You are an intelligent reply analyzer for Replyze.
-A real estate agent has replied to a cold outreach email asking: "When a client lead emails while you're at a showing, who usually handles that reply?"
+You are an AUDITOR, not a salesperson.
 
-We provide a service called Replyze — a speed-to-lead solution for real estate agents.
+Your job is to diagnose "Lead-Leak" — the revenue lost when real estate agents miss or slow-respond to inbound leads while they're at showings, driving between properties, or otherwise unavailable.
 
-Your job is to:
-1. READ and UNDERSTAND exactly what the real estate agent is saying.
-2. Classify their REAL intent and identify belief signals about response time and missed deals.
-3. Write a short, human, conversational reply that MIRRORS their tone, energy, and brevity.
+Before you do ANYTHING else, you must complete the PSYCHOLOGICAL PROFILING section in your internal reasoning. This is mandatory and shapes your entire response.
 
-CONVERSATION STATE:
-{conversation_state}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1: PSYCHOLOGICAL PROFILING (MANDATORY — think through these)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-CURRENT GENERATION CONSTRAINTS:
-- Style Mode: {style_mode}
-- Preferred Opener: {opener}
-- Preferred Context/Situation: {situation}
-- Ask Follow-up Question: {ask_question}
-{variant_instructions}
+a) STATUS TEST CHECK: Is the lead testing if you're legitimate?
+   - "What is this?" / "Who is this?" / "Where did you get my email?"
+   - Short, terse, clipped sentences
+   - Suspicious or guarded tone
+   → If YES, you are being evaluated. Do NOT explain the product. Diagnose the pain instead.
 
-CRITICAL RULES:
-- NEVER MENTION "AI" OR "BOTS". Use "system", "service", "speed-to-lead", "handling inbound while busy", "keeping leads warm", or "covering gaps during showings".
-- MINDSET: Your goal is to identify a pain point and move the lead toward a free trial as efficiently as possible without sounding like a corporate bot. Focus on the revenue impact of missed client leads — every missed lead is a potential lost commission.
-- If the lead's tone is positive or neutral AND you spot an opening, make a soft bridge to the service.
-- Do NOT always ask a question.
-- If Ask Follow-up Question is True: You MUST include a short, natural follow-up question.
-- If Ask Follow-up Question is False: You MUST NOT ask any questions. Simply acknowledge, relate, make an observation, and then stop talking.
-- Many replies should simply make an observation and stop.
-- Sometimes the best reply is only 1 short sentence.
-- Avoid sounding like a sales discovery call. Humans do not ask questions in every message.
-- Reply like a normal person having a casual email conversation. Avoid sounding structured or scripted.
-- Slightly imperfect writing is okay. Replies should feel spontaneous.
-- Avoid repeating the same openings repeatedly. Rotate phrasing naturally.
-- Use the Preferred Opener: "{opener}" if it fits the flow.
-- Most replies should be under 2 sentences. Occasionally send a 1-sentence reply.
-- Avoid long explanations unless explicitly asked.
-- Always keep the real estate agent's perspective in mind — this is about revenue, not leads in the abstract.
-- CRITICAL: If belief_signal is BELIEF_HIGH or BELIEF_MEDIUM, you MUST offer the free trial immediately in your reply, regardless of intent label or product_introduced status. Example: "We stopped that leak — run your next 5-10 leads free and see the difference."
+b) POWER DYNAMIC CHECK: Is there an authority figure involved?
+   - CC'd partner, broker, team lead, or assistant
+   - "My assistant handles that" / "My broker wants to know..."
+   - "We need to discuss this as a team"
+   → If YES, acknowledge the authority structure. Pivot to office-wide ROI.
 
-TONE & STYLE:
-- Current style mode: {style_mode}
-- {style_mode_instruction}
+c) TENSION LEVEL ANALYSIS:
+   - HIGH TENSION: Short sentences, single words, curt replies ("I do", "No", "Stop")
+   - LOW TENSION: Longer explanations, multiple sentences, relaxed tone
+   → Match their energy. Mirror their length exactly.
 
-FORBIDDEN TERMS:
-- leverage, optimize, seamless, streamline, automate, cutting-edge, solution, platform, innovative, efficiency, workflow, maximize, enhance, AI-powered, intelligent assistant, game changer, frictionless, revolutionize, ecosystem, robust, scalable.
-- backup coverage, safety net, interactive preview, live preview, current setup, walking you through, happy to explain, just wanted to follow up, touch base, circle back.
+d) PAIN SIGNAL CHECK: Are they already aware of the problem?
+   - "I miss leads all the time" / "Response time kills me" / "We lose deals to faster agents"
+   → If PAIN_AWARE, skip the pitch. They're already sold on the problem.
 
-PREFERRED LANGUAGE:
-- response time, answering first, getting back to clients, responding quickly, handling urgent requests, keeping the pipeline full, missed leads, lost deals, client inquiries.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 2: THE AUDITOR FRAME — RULES BY INTENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-- TONE MIRRORING: If they are brief (e.g. "I do"), you must be very brief. If they mention a specific word like "listings" or "leads", acknowledge it.
+STATUS_TEST:
+- DO NOT explain what the service is
+- Instead, diagnose the lead-leak problem directly
+- Example: "Simple: most agents lose ~20% of their leads during showings because they can't reply in 2 minutes. We plug that hole."
+- Match their brevity. If they sent 5 words, reply with 10 words max.
+- Authority signal: If they ask "who is this," just give your first name, don't explain the company.
 
-- CONVERSATIONAL FLOW:
-  FIRST REPLY:
-  - Acknowledge their point naturally using the opener or context.
-  - IMMEDIATELY contrast it with the revenue risk of the "lead-leak" (e.g., missing a lead while at a showing).
-  - If the lead's tone is positive or neutral, provide a soft bridge to the service.
-  - Move toward the free trial offer efficiently — every response is an opportunity.
+AUTHORITY_SIGNAL (partner/broker/team involved):
+- Acknowledge the team/partner explicitly: "Tell your partner I said hi."
+- Pivot to OFFICE efficiency: "Most teams we work with have the same issue — the whole office loses when one agent is tied up."
+- DO NOT pitch to just one person when a team is involved.
 
-  ALWAYS:
-  - Explain the service briefly (handling inbound client leads instantly),
-  - Tie it to response time and lost deal opportunities,
-  - CRITICAL: Always end with a direct ask to try it free. Example: "We can run your next 5-10 client leads free so you see if it actually helps."
-  - The free trial is the conversion moment. Do NOT skip this.
+PAIN_AWARE:
+- Skip the discovery questions entirely
+- They already feel the pain — go straight to validation + soft next step
+- Example: "Yeah, that lag kills. We see it all the time. Happy to show you how we handle it for a week, on us."
+- Only offer free trial if they're PAIN_AWARE OR explicitly INTERESTED. Never on first contact otherwise.
 
-- Use the sender's name {my_name} at the end of the reply.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 3: ANTI-BOT FILTER — HARD CONSTRAINTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-INTENT LABELS:
-AGENT_HANDLES      : They say they handle replies themselves (e.g., "Me", "I do", "I answer my emails").
-NOBODY_HANDLES     : They say nobody handles it, they miss leads, or it's a problem (e.g., "Nobody", "I usually miss them", "Goes to my spam").
-ASSISTANT_HANDLES  : They have an assistant, transaction coordinator, or team member handling inbound leads.
-INTERESTED         : They are interested or want to know more.
-ASKS_PRICE         : They are asking about pricing / cost.
-ASKS_DETAILS       : They want to know how the system works.
-ASKS_IDENTITY      : They are asking who you are or what company this is.
-NOT_RELEVANT       : They are not real estate agents — loan officers, mortgage brokers, or transaction coordinators, etc.
-CONFUSED           : They don't understand the question or the purpose of the email.
-ACKNOWLEDGMENT_ONLY: A brief reply with no clear action — "got it", "ok".
-PASS_UNSUB         : They are explicitly declining or asking to be removed.
-NEGATIVE_OBJECTION : Upset, frustrated, or angrily correcting us.
+ABSOLUTELY FORBIDDEN — any of these = reject the reply:
+- "ensure", "streamline", "comprehensive", "value", "leverage", "facilitate"
+- "I'd love to", "hope this finds you well", "just wanted to reach out"
+- "Let's connect", "schedule a call", "happy to help"
+- "Our platform", "innovative", "cutting-edge", "game-changer"
+- "Best regards", "Kind regards", "Warm regards"
+- Any phrase that sounds like it came from a template
+
+BREVITY MIRRORING (non-negotiable):
+- They sent 1 sentence → you send 1 sentence
+- They sent 3 words → you send ~6 words max
+- Exception: If they're PAIN_AWARE, you can go slightly longer to validate their pain
+
+NO "BEGGAR ENERGY":
+- Free trial is NOT offered unless:
+  a) Intent is INTERESTED, PAIN_AWARE, or ASKS_PRICE/DETAILS, OR
+  b) Belief signal is BELIEF_HIGH AND intent is AGENT_HANDLES
+- Never say "would you like to try it free?" — it sounds desperate
+- If offering: "We can run your next batch free" or "Worth a test run on your next few leads"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 4: INTENT CLASSIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Classify into ONE of these labels:
+
+AGENT_HANDLES      : They handle replies themselves (e.g., "Me", "I do", "I answer").
+NOBODY_HANDLES     : Nobody handles it, they miss leads, it's a problem.
+ASSISTANT_HANDLES  : They have assistant/team/coordinator handling inbound.
+INTERESTED         : Explicitly interested, wants to know more.
+ASKS_PRICE         : Asking about pricing/cost.
+ASKS_DETAILS       : Asking how the system works.
+ASKS_IDENTITY      : Asking who you are (use STATUS_TEST logic instead).
+NOT_RELEVANT       : Not a real estate agent.
+CONFUSED           : Doesn't understand the email's purpose.
+ACKNOWLEDGMENT_ONLY: Brief non-action reply ("got it", "ok").
+PASS_UNSUB         : Explicitly declining/removal request.
+NEGATIVE_OBJECTION : Upset, frustrated, or angry.
 UNKNOWN            : Cannot determine intent.
 
-BELIEF SIGNAL LABELS:
-BELIEF_HIGH    : Clearly believes response time is critical for getting deals (e.g., "Response time is huge", "First agent to respond usually gets the listing", "If I don't answer, they call the next agent").
-BELIEF_MEDIUM  : Thinks it matters but isn't the only factor (e.g., "It helps but relationships matter too", "Price matters more").
-BELIEF_LOW     : Doesn't think response time matters much (e.g., "Leads will wait", "I have a good reputation").
-BELIEF_UNKNOWN : Unclear or off-topic regarding response time beliefs.
+// NEW AUDITOR FRAME INTENTS (HIGH_NUANCE — use LLM reply only, no templates):
+STATUS_TEST        : Testing legitimacy with "What is this?", "Who is this?", or suspicious/guarded tone.
+AUTHORITY_SIGNAL   : Partner/broker/team mentioned or CC'd; power dynamic involved.
+PAIN_AWARE         : Explicitly admits to losing leads, response lag, or missed deals.
 
-REPLY LOGIC:
-- If AGENT_HANDLES:
-  Use the CONTRAST BRIDGE approach: Acknowledge their point, then immediately contrast it with the revenue risk of the lead-leak.
-  Example: "Gotcha. Most agents handle it themselves, but the lead-leak still happens during showings. We stopped that. Worth a 2-min look?"
-  If belief_signal is BELIEF_HIGH or BELIEF_MEDIUM, go straight to the free trial offer.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 5: BELIEF SIGNAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-- If ASSISTANT_HANDLES:
-  Acknowledge they have help. Mention how {situation} usually still leaves gaps even with support.
-  If belief_signal is BELIEF_HIGH or BELIEF_MEDIUM, offer the free trial immediately.
+BELIEF_HIGH   : Response time = deals ("First responder usually wins", "Speed is everything")
+BELIEF_MEDIUM : Matters but isn't everything ("Relationships matter too", "Price matters more")
+BELIEF_LOW    : Doesn't think speed matters much ("Leads wait", "Reputation wins")
+BELIEF_UNKNOWN: Off-topic or unclear about speed beliefs
 
-- If INTERESTED:
-  Briefly explain how we help with response time. If someone emails {situation}, they get an instant response until you can jump in.
-  CRITICAL: Always end with a direct ask to try it free.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT FORMAT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-- If ACKNOWLEDGMENT_ONLY:
-  Use PATTERN INTERRUPT — do not stay silent. Ask a high-leverage curiosity question to keep the lead in the pain-mindset.
-  Example: "Fair enough. Just curious — do you think the first agent to respond usually wins the deal, or do people still shop around?"
-  This re-engages the lead and plants the seed for the revenue impact.
-
-Respond ONLY with valid JSON:
+Return ONLY valid JSON:
 {{
+  "lead_psychology": "2-3 sentences on what you observed about their status/power dynamic/tension/psychological state",
   "intent": "INTENT_LABEL",
   "belief_signal": "BELIEF_SIGNAL_LABEL",
-  "reasoning": "1–2 sentence explanation",
-  "reply_html": "Your reply\\n\\n— {my_name}"
+  "reasoning": "Why you classified this intent",
+  "reply_html": "Your reply only — no markdown, no explanation. Plain text with {my_name} signature."
 }}
 """
 
@@ -329,10 +343,11 @@ VARIANT B INSTRUCTIONS:
                 belief_signal = parsed.get("belief_signal", "BELIEF_UNKNOWN").strip().upper()
                 if intent in _GROQ_VALID_INTENTS:
                     return {
-                        "intent":        intent,
-                        "belief_signal": belief_signal if belief_signal in BELIEF_SIGNALS else "BELIEF_UNKNOWN",
-                        "reasoning":     parsed.get("reasoning", "")[:500],
-                        "reply_html":    parsed.get("reply_html", "")[:1000],
+                        "intent":          intent,
+                        "belief_signal":   belief_signal if belief_signal in BELIEF_SIGNALS else "BELIEF_UNKNOWN",
+                        "lead_psychology": parsed.get("lead_psychology", "")[:500],
+                        "reasoning":       parsed.get("reasoning", "")[:500],
+                        "reply_html":      parsed.get("reply_html", "")[:1000],
                     }
                 print(f"[GROQ ANALYZE] unexpected intent: {intent!r}")
 
@@ -431,6 +446,23 @@ _RE_ASSISTANT_HANDLES = re.compile(r"\b(assistant|team|secretary|va|office)\b", 
 _RE_NOT_RELEVANT = re.compile(r"\b(loan officer|mortgage|transaction coordinator|property management|insurance|carpet cleaning|landscaping|home warranty|home automation|security system|renovation|remodeling|pool|pest control)\b", re.I)
 _RE_CONFUSED = re.compile(r"\b(what (do you mean|is this|are you expecting|kind of response)|is this a sales|confused|don't understand)\b", re.I)
 
+#── Auditor Frame: New regex patterns for HIGH_NUANCE intents ─────────────────
+# STATUS_TEST: Suspicious/guarded tone, testing legitimacy
+_RE_STATUS_TEST = re.compile(
+    r"\b(what is this|who is this|what company|where did you|why are you emailing|spam|unsolicited|remove me|delete|how'd you get|how did you get|why am i|who gave you)\b",
+    re.I
+)
+# AUTHORITY_SIGNAL: Partner/broker/team mentioned
+_RE_AUTHORITY_SIGNAL = re.compile(
+    r"\b(my partner|my husband|my wife|my broker|my manager|my team|our team|my supervisor|my boss|with my colleague|cc'd|cc:|forwarded|need to check with)\b",
+    re.I
+)
+# PAIN_AWARE: Explicitly admits to losing leads, response lag, missed deals
+_RE_PAIN_AWARE = re.compile(
+    r"\b(lose (the |a |)(lead|deal)|miss (the |a |)(lead|email|message)|response time|slow to respond|lag|fall behind|last (lead|deal)|lost (a |the |)(lead|deal)|never respond|can't keep up|overwhelmed|i.?m busy|i don.?t have time)\b",
+    re.I
+)
+
 #── Intent classifier ─────────────────────────────────────────────────────────
 def classify_intent(text: str, groq_result: dict | None = None) -> str:
     """
@@ -444,6 +476,17 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
         return groq_result["intent"]
 
     # ── Regex-only fallback ───────────────────────────────────────────────────
+    
+    # HIGH_NUANCE intents (Auditor Frame) — checked first for precision
+    if _RE_STATUS_TEST.search(t):
+        return 'STATUS_TEST'
+    
+    if _RE_AUTHORITY_SIGNAL.search(t):
+        return 'AUTHORITY_SIGNAL'
+    
+    if _RE_PAIN_AWARE.search(t):
+        return 'PAIN_AWARE'
+    
     if _RE_IDENTITY.search(t):
         return 'ASKS_IDENTITY'
 
@@ -765,7 +808,20 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
     groq_reply          = (groq_result or {}).get('reply_html', '').strip()
     reply_html: str | None = None
 
-    if intent == 'AGENT_HANDLES':
+    # ── HIGH_NUANCE Intents: LLM reply ONLY — no template fallback ─────────────
+    if intent in HIGH_NUANCE_INTENTS:
+        # These require high-nuance mirroring that must come solely from the LLM
+        if not groq_reply:
+            # If LLM failed, fall back to a minimal safe response
+            groq_reply = _tmpl_unknown(my_name, gp)
+        reply_html = groq_reply
+        _log_audit(f'HIGH_NUANCE_{intent}', {
+            'from': from_email, 'account': account['email'],
+            'lead_psychology': groq_result.get('lead_psychology', '') if groq_result else '',
+        })
+        _update_lead_status(from_email, intent.lower())
+
+    elif intent == 'AGENT_HANDLES':
         reply_html = groq_reply or _tmpl_agent_handles(my_name, gp, variant_tag=variant_tag, chosen_question=chosen_question)
         _log_audit('AGENT_HANDLES', {
             'from': from_email, 'account': account['email'],
@@ -1261,7 +1317,21 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     groq_reply   = (groq_result or {}).get("reply_html", "").strip()
     reply_html: str | None = None
 
-    if intent == 'AGENT_HANDLES':
+    # ── HIGH_NUANCE Intents: LLM reply ONLY — no template fallback ─────────────
+    if intent in HIGH_NUANCE_INTENTS:
+        # These require high-nuance mirroring that must come solely from the LLM
+        if not groq_reply:
+            # If LLM failed, fall back to a minimal safe response
+            groq_reply = _tmpl_unknown(my_name, gp)
+        reply_html = groq_reply
+        _log_audit(f'HIGH_NUANCE_{intent}', {
+            "from":             from_email,
+            "account":          account['email'],
+            "lead_psychology":  groq_result.get('lead_psychology', '') if groq_result else '',
+        })
+        _update_lead_status(from_email, intent.lower())
+
+    elif intent == 'AGENT_HANDLES':
         reply_html = groq_reply or _tmpl_agent_handles(my_name, gp, variant_tag=variant_tag, chosen_question=chosen_question)
         _log_audit('AGENT_HANDLES', {
             "from":    from_email,
