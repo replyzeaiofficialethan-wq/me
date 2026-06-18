@@ -17,7 +17,12 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from supabase import create_client
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-#from notify import notify  # ← ntfy.sh push notifications
+try:
+    from notify import notify  # ← ntfy.sh push notifications
+except ImportError:
+    # Fallback no-op if notify module is not available
+    def notify(title, message, priority='default', tags=None):
+        print(f"[NOTIFY] {title}: {message}")
 
 #── Supabase ──────────────────────────────────────────────────────────────────
 SUPABASE_URL = os.environ['SUPABASE_URL']
@@ -118,14 +123,16 @@ _groq_cursor: int       = 0
 
 #── Real Estate Agent Intent Classification ────────────────────────────────────
 # Intents marked as HIGH_NUANCE require LLM-generated replies only (no template fallback)
-HIGH_NUANCE_INTENTS = {'STATUS_TEST', 'AUTHORITY_SIGNAL', 'PAIN_AWARE'}
+HIGH_NUANCE_INTENTS = {'STATUS_TEST', 'AUTHORITY_SIGNAL', 'PAIN_AWARE', 'AGREED_TO_SEE'}
 
 _GROQ_VALID_INTENTS = {
     'AGENT_HANDLES', 'NOBODY_HANDLES', 'ASSISTANT_HANDLES', 'INTERESTED',
     'ASKS_PRICE', 'ASKS_DETAILS', 'ASKS_IDENTITY', 'ACKNOWLEDGMENT_ONLY',
     'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'NOT_RELEVANT', 'CONFUSED', 'UNKNOWN',
     # New Auditor Frame intents
-    'STATUS_TEST', 'AUTHORITY_SIGNAL', 'PAIN_AWARE'
+    'STATUS_TEST', 'AUTHORITY_SIGNAL', 'PAIN_AWARE',
+    # Silent handoff intent - bot stays silent, admin is notified
+    'AGREED_TO_SEE'
 }
 
 #── System prompt: THE AUDITOR FRAME ─────────────────────────────────────────
@@ -156,6 +163,8 @@ c) TENSION LEVEL ANALYSIS:
    - HIGH TENSION: Short sentences, single words, curt replies ("I do", "No", "Stop")
    - LOW TENSION: Longer explanations, multiple sentences, relaxed tone
    → Match their energy. Mirror their length exactly.
+
+CRITICAL RULE: NEVER reply with only the lead's name, a single-word greeting, or a simple acknowledgment. Mirroring applies to the LENGTH and ENERGY of the response, NOT the content. Even for the briefest inputs, the response MUST include a value-driven statement, a pain-point reminder, or a curiosity question aligned with the Auditor Frame. Every response must push the lead toward the 'lead-leak' realization or a trial.
 
 d) PAIN SIGNAL CHECK: Are they already aware of the problem?
    - "I miss leads all the time" / "Response time kills me" / "We lose deals to faster agents"
@@ -231,6 +240,7 @@ UNKNOWN            : Cannot determine intent.
 STATUS_TEST        : Testing legitimacy with "What is this?", "Who is this?", or suspicious/guarded tone.
 AUTHORITY_SIGNAL   : Partner/broker/team mentioned or CC'd; power dynamic involved.
 PAIN_AWARE         : Explicitly admits to losing leads, response lag, or missed deals.
+AGREED_TO_SEE      : Lead explicitly agrees to see a demo or system. Trigger phrases: "Yes", "Sure", "Show me", "Okay", "Let's do it", or similar affirmative responses to a demo/trial offer. When classified, bot should return reply_html as "SILENT_HANDOFF" — this signals admin to take over for personalized close. DO NOT generate a standard reply.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP 5: BELIEF SIGNAL
@@ -809,8 +819,28 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
     reply_html: str | None = None
 
     # ── HIGH_NUANCE Intents: LLM reply ONLY — no template fallback ─────────────
-    if intent in HIGH_NUANCE_INTENTS:
-        # These require high-nuance mirroring that must come solely from the LLM
+    if intent == 'AGREED_TO_SEE':
+        # SILENT HANDOFF: Lead agreed to demo → bot stays silent, admin is notified
+        reply_html = None  # No auto-reply to the lead
+        _log_audit('AGREED_TO_SEE_SILENT_HANDOFF', {
+            'from': from_email, 'account': account['email'],
+            'subject': subject, 'raw_reply': body_text[:200],
+            'lead_psychology': groq_result.get('lead_psychology', '') if groq_result else '',
+        })
+        _update_lead_status(from_email, 'agreed_to_see')
+        # Trigger high-priority admin notification for personalized close
+        try:
+            notify(
+                '🔥 HOT LEAD — AGREED TO SEE',
+                f'Lead {from_email} agreed to see demo.\nSubject: {subject}\nFrom: {account["email"]}\n\nSend personalized demo link NOW.',
+                priority='high',
+                tags='fire,wave'
+            )
+        except Exception as notify_err:
+            print(f"[NOTIFY ERROR] {notify_err}")
+
+    elif intent in HIGH_NUANCE_INTENTS:
+        # Other HIGH_NUANCE intents: use LLM reply only
         if not groq_reply:
             # If LLM failed, fall back to a minimal safe response
             groq_reply = _tmpl_unknown(my_name, gp)
@@ -1318,8 +1348,30 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
     reply_html: str | None = None
 
     # ── HIGH_NUANCE Intents: LLM reply ONLY — no template fallback ─────────────
-    if intent in HIGH_NUANCE_INTENTS:
-        # These require high-nuance mirroring that must come solely from the LLM
+    if intent == 'AGREED_TO_SEE':
+        # SILENT HANDOFF: Lead agreed to demo → bot stays silent, admin is notified
+        reply_html = None  # No auto-reply to the lead
+        _log_audit('AGREED_TO_SEE_SILENT_HANDOFF', {
+            "from":             from_email,
+            "account":          account['email'],
+            "subject":          subject,
+            "raw_reply":        body_text[:200],
+            "lead_psychology":  groq_result.get('lead_psychology', '') if groq_result else '',
+        })
+        _update_lead_status(from_email, 'agreed_to_see')
+        # Trigger high-priority admin notification for personalized close
+        try:
+            notify(
+                '🔥 HOT LEAD — AGREED TO SEE',
+                f'Lead {from_email} agreed to see demo.\nSubject: {subject}\nFrom: {account["email"]}\n\nSend personalized demo link NOW.',
+                priority='high',
+                tags='fire,wave'
+            )
+        except Exception as notify_err:
+            print(f"[NOTIFY ERROR] {notify_err}")
+
+    elif intent in HIGH_NUANCE_INTENTS:
+        # Other HIGH_NUANCE intents: use LLM reply only
         if not groq_reply:
             # If LLM failed, fall back to a minimal safe response
             groq_reply = _tmpl_unknown(my_name, gp)
