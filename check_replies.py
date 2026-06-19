@@ -851,6 +851,26 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         })
         _update_lead_status(from_email, intent.lower())
 
+    elif intent == 'INTERESTED':
+        # SILENT HANDOFF: Lead expressed interest → bot stays silent, admin is notified
+        reply_html = None  # No auto-reply to the lead
+        _log_audit('INTERESTED_SILENT_HANDOFF', {
+            'from': from_email, 'account': account['email'],
+            'subject': subject, 'raw_reply': body_text[:200],
+            'lead_psychology': groq_result.get('lead_psychology', '') if groq_result else '',
+        })
+        _update_lead_status(from_email, 'interested')
+        # Trigger high-priority admin notification for personalized close
+        try:
+            notify(
+                '🔥 HOT LEAD — EXPRESSED INTEREST',
+                f'Lead {from_email} is interested!\nSubject: {subject}\nFrom: {account["email"]}\n\nTake over the conversation NOW.',
+                priority='high',
+                tags='fire,wave'
+            )
+        except Exception as notify_err:
+            print(f"[NOTIFY ERROR] {notify_err}")
+
     elif intent == 'AGENT_HANDLES':
         reply_html = groq_reply or _tmpl_agent_handles(my_name, gp, variant_tag=variant_tag, chosen_question=chosen_question)
         _log_audit('AGENT_HANDLES', {
@@ -872,12 +892,7 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         })
         _update_lead_status(from_email, 'assistant_handles')
 
-    elif intent == 'INTERESTED':
-        reply_html = groq_reply or _tmpl_interested(my_name, gp)
-        _log_audit('INTERESTED', {
-            'from': from_email, 'account': account['email'],
-        })
-        _update_lead_status(from_email, 'interested')
+    # INTERESTED: Handled as SILENT HANDOFF above - admin takes over
 
     elif intent == 'ASKS_IDENTITY':
         reply_html = groq_reply or _tmpl_asks_identity(my_name, gp)
@@ -1370,6 +1385,28 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         except Exception as notify_err:
             print(f"[NOTIFY ERROR] {notify_err}")
 
+    elif intent == 'INTERESTED':
+        # SILENT HANDOFF: Lead expressed interest → bot stays silent, admin is notified
+        reply_html = None  # No auto-reply to the lead
+        _log_audit('INTERESTED_SILENT_HANDOFF', {
+            "from":             from_email,
+            "account":          account['email'],
+            "subject":          subject,
+            "raw_reply":        body_text[:200],
+            "lead_psychology":  groq_result.get('lead_psychology', '') if groq_result else '',
+        })
+        _update_lead_status(from_email, 'interested')
+        # Trigger high-priority admin notification for personalized close
+        try:
+            notify(
+                '🔥 HOT LEAD — EXPRESSED INTEREST',
+                f'Lead {from_email} is interested!\nSubject: {subject}\nFrom: {account["email"]}\n\nTake over the conversation NOW.',
+                priority='high',
+                tags='fire,wave'
+            )
+        except Exception as notify_err:
+            print(f"[NOTIFY ERROR] {notify_err}")
+
     elif intent in HIGH_NUANCE_INTENTS:
         # Other HIGH_NUANCE intents: use LLM reply only
         if not groq_reply:
@@ -1407,13 +1444,7 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         })
         _update_lead_status(from_email, 'assistant_handles')
 
-    elif intent == 'INTERESTED':
-        reply_html = groq_reply or _tmpl_interested(my_name, gp)
-        _log_audit('INTERESTED', {
-            "from":    from_email,
-            "account": account["email"],
-        })
-        _update_lead_status(from_email, 'interested')
+    # INTERESTED: Handled as SILENT HANDOFF above - admin takes over
 
     elif intent == 'ASKS_IDENTITY':
         # They want to know who sent this — confirm identity confidently, no apology
