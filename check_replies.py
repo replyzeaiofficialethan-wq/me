@@ -121,6 +121,26 @@ def load_groq_keys() -> list[str]:
 GROQ_KEYS:    list[str] = load_groq_keys()
 _groq_cursor: int       = 0
 
+#── Model configuration for rotation ─────────────────────────────────────────
+# Model assignment based on capabilities:
+# - gpt-oss-20b: Fast, smaller model for simple tasks
+# - llama-4-scout-17b-16e-instruct: Balanced model for complex analysis
+# - gpt-oss-120b: Large model for complex reasoning
+
+ANALYSIS_MODELS = [
+    "meta-llama/llama-4-scout-17b-16e-instruct",  # Primary: complex intent analysis
+    "openai/gpt-oss-20b",                           # Fallback 1: rotation
+    "openai/gpt-oss-120b",                          # Fallback 2: rotation
+]
+_analysis_model_cursor: int = 0
+
+CLASSIFICATION_MODELS = [
+    "openai/gpt-oss-20b",                           # Primary: simple classification
+    "meta-llama/llama-4-scout-17b-16e-instruct",   # Fallback 1: rotation
+    "openai/gpt-oss-120b",                          # Fallback 2: rotation
+]
+_classification_model_cursor: int = 0
+
 #── Real Estate Agent Intent Classification ────────────────────────────────────
 # Intents marked as HIGH_NUANCE require LLM-generated replies only (no template fallback)
 HIGH_NUANCE_INTENTS = {'STATUS_TEST', 'AUTHORITY_SIGNAL', 'PAIN_AWARE', 'AGREED_TO_SEE'}
@@ -272,8 +292,9 @@ def _groq_analyze_reply(text: str, property_address: str = "your service area", 
     a contextually appropriate response. Returns:
     { intent, belief_signal, reasoning, reply_html }
     Returns None if all keys fail or the model returns unusable output.
+    Uses model rotation for rate limit handling.
     """
-    global _groq_cursor
+    global _groq_cursor, _analysis_model_cursor
     if not GROQ_KEYS:
         return None
     
@@ -321,16 +342,25 @@ VARIANT B INSTRUCTIONS:
         variant_instructions=variant_instructions
     )
 
-    for _ in range(len(GROQ_KEYS)):
+    # Rotate through all model/key combinations
+    max_attempts = len(GROQ_KEYS) * len(ANALYSIS_MODELS)
+    for _ in range(max_attempts):
         key = GROQ_KEYS[_groq_cursor % len(GROQ_KEYS)]
+        model = ANALYSIS_MODELS[_analysis_model_cursor % len(ANALYSIS_MODELS)]
         _groq_cursor += 1
+        
+        # Advance model cursor only when we've tried all keys for current model
+        if _groq_cursor % len(GROQ_KEYS) == 0:
+            _analysis_model_cursor = (_analysis_model_cursor + 1) % len(ANALYSIS_MODELS)
+            print(f"[GROQ ANALYZE] Rotating to model: {ANALYSIS_MODELS[_analysis_model_cursor % len(ANALYSIS_MODELS)]}")
+        
         try:
             resp = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {key}",
                          "Content-Type":  "application/json"},
                 json={
-                    "model":  "llama-3.3-70b-versatile",
+                    "model":  model,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user",   "content": f"Analyze this reply:\n\n{text[:1200]}"},
@@ -362,7 +392,7 @@ VARIANT B INSTRUCTIONS:
                 print(f"[GROQ ANALYZE] unexpected intent: {intent!r}")
 
             elif resp.status_code == 429:
-                print(f"[GROQ] Key {_groq_cursor-1} rate-limited, trying next")
+                print(f"[GROQ] Key {_groq_cursor-1} rate-limited, trying next model: {model}")
                 continue
             else:
                 print(f"[GROQ] {resp.status_code}: {resp.text[:120]}")
@@ -375,19 +405,32 @@ VARIANT B INSTRUCTIONS:
 
 # Legacy label-only fallback (used only when _groq_analyze_reply fails entirely)
 def _groq_classify_llm(text: str) -> str | None:
-    global _groq_cursor
+    """
+    Simple classification fallback using model rotation.
+    Uses gpt-oss-20b for fast classification, rotates through all models on rate limit.
+    """
+    global _groq_cursor, _classification_model_cursor
     if not GROQ_KEYS:
         return None
-    for _ in range(len(GROQ_KEYS)):
+    
+    max_attempts = len(GROQ_KEYS) * len(CLASSIFICATION_MODELS)
+    for _ in range(max_attempts):
         key = GROQ_KEYS[_groq_cursor % len(GROQ_KEYS)]
+        model = CLASSIFICATION_MODELS[_classification_model_cursor % len(CLASSIFICATION_MODELS)]
         _groq_cursor += 1
+        
+        # Advance model cursor when we've tried all keys for current model
+        if _groq_cursor % len(GROQ_KEYS) == 0:
+            _classification_model_cursor = (_classification_model_cursor + 1) % len(CLASSIFICATION_MODELS)
+            print(f"[GROQ CLASSIFY] Rotating to model: {CLASSIFICATION_MODELS[_classification_model_cursor % len(CLASSIFICATION_MODELS)]}")
+        
         try:
             resp = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {key}",
                          "Content-Type":  "application/json"},
                 json={
-                    "model":  "llama-3.1-8b-instant",
+                    "model":  model,
                     "messages": [
                         {"role": "system", "content": (
                             "You classify cold outreach reply intent for a real estate agent.  "
@@ -410,6 +453,7 @@ def _groq_classify_llm(text: str) -> str | None:
                         return valid
                 return None
             if resp.status_code == 429:
+                print(f"[GROQ] Key {_groq_cursor-1} rate-limited, trying next model: {model}")
                 continue
         except Exception as exc:
             print(f"[GROQ ERROR] {exc}")
