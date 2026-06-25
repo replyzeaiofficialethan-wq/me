@@ -1096,6 +1096,19 @@ def demo():
                            supabase_anon_key=os.environ['SUPABASE_ANON_KEY'])
 
 
+# ── Model configuration for rotation ─────────────────────────────────────────
+# Model assignment for email generation:
+# - gpt-oss-120b: Primary for complex creative generation
+# - llama-4-scout-17b-16e-instruct: Fallback for rotation
+# - gpt-oss-20b: Fallback for rotation
+
+EMAIL_MODELS = [
+    "openai/gpt-oss-120b",                          # Primary: complex creative generation
+    "meta-llama/llama-4-scout-17b-16e-instruct",   # Fallback 1: rotation
+    "openai/gpt-oss-20b",                           # Fallback 2: rotation
+]
+_email_model_cursor: int = 0
+
 @app.route('/api/generate-reply-prompt', methods=['OPTIONS', 'POST'])
 def generate_reply_prompt():
     if request.method == "OPTIONS":
@@ -1133,23 +1146,39 @@ Email to respond to:
         if not GROQ_API_KEY:
             return jsonify({"error": "Groq API key not configured"}), 500
 
-        r = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}",
-                     "Content-Type": "application/json"},
-            json={
-                "model": "llama-3.1-8b-instant",
-                "messages": [
-                    {"role": "system", "content": "You are a professional home services business owner."},
-                    {"role": "user",   "content": enhanced}
-                ],
-                "temperature": 0.7, "max_tokens": 1024, "top_p": 0.8
-            }, timeout=30
-        )
-        if r.status_code != 200:
-            return jsonify({"error": f"Groq error: {r.status_code}"}), 500
+        # Rotate through models on rate limit
+        result = None
+        for _ in range(len(EMAIL_MODELS)):
+            model = EMAIL_MODELS[_email_model_cursor % len(EMAIL_MODELS)]
+            _email_model_cursor += 1
+            
+            r = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                         "Content-Type": "application/json"},
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": "You are a professional home services business owner."},
+                        {"role": "user",   "content": enhanced}
+                    ],
+                    "temperature": 0.7, "max_tokens": 1024, "top_p": 0.8
+                }, timeout=30
+            )
+            
+            if r.status_code == 200:
+                result = r.json()
+                break
+            elif r.status_code == 429:
+                print(f"[GROQ EMAIL] Rate-limited on model {model}, trying next")
+                continue
+            else:
+                return jsonify({"error": f"Groq error: {r.status_code}"}), 500
+        
+        if result is None:
+            return jsonify({"error": "All models rate-limited, please try again later"}), 503
 
-        full     = r.json()["choices"][0]["message"]["content"].strip()
+        full     = result["choices"][0]["message"]["content"].strip()
         sections = {}
         cur      = None
         for line in full.split('\n'):
