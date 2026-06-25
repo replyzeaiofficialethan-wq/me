@@ -9,31 +9,58 @@ SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
 supabase     = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# ── Model configuration for rotation ─────────────────────────────────────────
+# Model assignment for audit analysis:
+# - gpt-oss-120b: Primary for complex analysis and report synthesis
+# - llama-4-scout-17b-16e-instruct: Fallback for rotation
+# - gpt-oss-20b: Fallback for rotation
+
+AUDIT_MODELS = [
+    "openai/gpt-oss-120b",                          # Primary: complex analysis
+    "meta-llama/llama-4-scout-17b-16e-instruct",   # Fallback 1: rotation
+    "openai/gpt-oss-20b",                           # Fallback 2: rotation
+]
+_audit_model_cursor: int = 0
+
 # ── Groq Setup ──────────────────────────────────────────────────────────────
 def get_groq_completion(prompt, system_prompt):
+    global _audit_model_cursor
     key = os.environ.get('GROQ_API_KEY')
     if not key:
         return "GROQ_API_KEY not configured."
     
-    try:
-        resp = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.2
-            },
-            timeout=60
-        )
-        if resp.status_code == 200:
-            return resp.json()["choices"][0]["message"]["content"]
-        return f"Error: {resp.status_code} - {resp.text}"
-    except Exception as e:
-        return f"Exception: {str(e)}"
+    # Rotate through models on rate limit
+    for _ in range(len(AUDIT_MODELS)):
+        model = AUDIT_MODELS[_audit_model_cursor % len(AUDIT_MODELS)]
+        _audit_model_cursor += 1
+        
+        try:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.2
+                },
+                timeout=60
+            )
+            if resp.status_code == 200:
+                return resp.json()["choices"][0]["message"]["content"]
+            elif resp.status_code == 429:
+                print(f"[GROQ AUDIT] Rate-limited on model {model}, trying next")
+                continue
+            return f"Error: {resp.status_code} - {resp.text}"
+        except Exception as e:
+            if _ < len(AUDIT_MODELS) - 1:
+                print(f"[GROQ AUDIT] Exception on model {model}: {e}, trying next")
+                continue
+            return f"Exception: {str(e)}"
+    
+    return "All models rate-limited, please try again later."
 
 # ── Data Fetching ───────────────────────────────────────────────────────────
 def fetch_audit_data():
