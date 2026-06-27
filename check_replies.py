@@ -38,6 +38,36 @@ def aesgcm_decrypt(b64text: str) -> str:
     ct    = data[12:]
     return AESGCM(ENCRYPTION_KEY).decrypt(nonce, ct, None).decode('utf-8')
 
+#── Demo Link Builder ─────────────────────────────────────────────────────────
+DEMO_LINK_BASE = "https://replyzeai.com/goods/templates/demo"
+
+def _get_email_queue_ids(lead_email: str) -> dict | None:
+    """
+    Look up the most recent email_queue entry for a lead email.
+    Returns {eqid, lead_id, campaign_id} or None if not found.
+    """
+    try:
+        result = supabase.table("email_queue") \
+            .select("id, lead_id, campaign_id") \
+            .eq("lead_email", lead_email.lower()) \
+            .order("created_at", desc=True) \
+            .limit(1) \
+            .execute()
+        if result.data:
+            row = result.data[0]
+            return {
+                "eqid": row["id"],
+                "lead_id": row["lead_id"],
+                "campaign_id": row["campaign_id"]
+            }
+    except Exception as e:
+        print(f"[EMAIL_QUEUE_LOOKUP ERROR] {e}")
+    return None
+
+def _build_demo_link(lead_id: int, campaign_id: int, eqid: int) -> str:
+    """Construct the personalized demo link with all required IDs."""
+    return f"{DEMO_LINK_BASE}?lead_id={lead_id}&campaign_id={campaign_id}&eqid={eqid}"
+
 #── Gmail API ─────────────────────────────────────────────────────────────────
 GOOGLE_TOKEN_URL     = "https://oauth2.googleapis.com/token"
 GOOGLE_CLIENT_ID     = os.environ.get('GOOGLE_CLIENT_ID', '')
@@ -70,15 +100,6 @@ OPENERS = [
     "Exactly."
 ]
 
-BELIEF_QUESTIONS = [
-    "Out of curiosity, how much do you think response time matters when a lead emails you during a showing? Some agents tell me it's huge — others say leads just email the next agent.",
-    "Random question — do you think the first agent to respond to a lead usually gets the deal, or do people still shop around after?"
-]
-
-BELIEF_QUESTION_RATE = 0.5
-
-BELIEF_SIGNALS = ['BELIEF_HIGH', 'BELIEF_MEDIUM', 'BELIEF_LOW', 'BELIEF_UNKNOWN']
-
 SITUATIONS = [
     "while you're at a showing",
     "during an open house",
@@ -100,7 +121,6 @@ def get_generation_params():
         "opener": random.choice(OPENERS),
         "situation": random.choice(SITUATIONS),
         "style_mode": random.choice(STYLE_MODES),
-        "ask_question": random.random() < 0.35  # 30-40% probability
     }
 
 #── Groq multi-key pool ───────────────────────────────────────────────────────
@@ -142,78 +162,102 @@ CLASSIFICATION_MODELS = [
 _classification_model_cursor: int = 0
 
 #── Real Estate Agent Intent Classification ────────────────────────────────────
-# Intents marked as HIGH_NUANCE require LLM-generated replies only (no template fallback)
-HIGH_NUANCE_INTENTS = {'STATUS_TEST', 'AUTHORITY_SIGNAL', 'PAIN_AWARE', 'AGREED_TO_SEE'}
+# All intents that receive demo links in the Concierge frame
+DEMO_LINK_INTENTS = {
+    'INTERESTED', 'PAIN_AWARE', 'ACKNOWLEDGMENT_ONLY',
+    'ASKS_PRICE', 'ASKS_DETAILS', 'ASKS_IDENTITY',
+    'AGENT_HANDLES', 'NOBODY_HANDLES', 'ASSISTANT_HANDLES',
+    'STATUS_TEST', 'AUTHORITY_SIGNAL', 'AGREED_TO_SEE'
+}
 
 _GROQ_VALID_INTENTS = {
     'AGENT_HANDLES', 'NOBODY_HANDLES', 'ASSISTANT_HANDLES', 'INTERESTED',
     'ASKS_PRICE', 'ASKS_DETAILS', 'ASKS_IDENTITY', 'ACKNOWLEDGMENT_ONLY',
     'PASS_UNSUB', 'NEGATIVE_OBJECTION', 'NOT_RELEVANT', 'CONFUSED', 'UNKNOWN',
-    # New Auditor Frame intents
-    'STATUS_TEST', 'AUTHORITY_SIGNAL', 'PAIN_AWARE',
-    # Silent handoff intent - bot stays silent, admin is notified
-    'AGREED_TO_SEE'
+    'STATUS_TEST', 'AUTHORITY_SIGNAL', 'PAIN_AWARE', 'AGREED_TO_SEE'
 }
 
-#── System prompt: THE AUDITOR FRAME ─────────────────────────────────────────
+#── System prompt: THE CONCIERGE FRAME ───────────────────────────────────────
 _GROQ_SYSTEM_PROMPT = """
-You are an AUDITOR, not a salesperson.
+You are a CONCIERGE, not a salesperson or auditor.
 
-Your job is to diagnose "Lead-Leak" — the revenue lost when real estate agents miss or slow-respond to inbound leads while they're at showings, driving between properties, or otherwise unavailable.
-
-Before you do ANYTHING else, you must complete the PSYCHOLOGICAL PROFILING section in your internal reasoning. This is mandatory and shapes your entire response.
+Your job is to deliver value immediately. When a real estate agent responds positively or neutrally to our outreach, you send them a personalized demo link — no questions asked, no diagnosis, no "belief questions."
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 1: PSYCHOLOGICAL PROFILING (MANDATORY — think through these)
+DIRECT-TO-VALUE RULE (CORE PRINCIPLE)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-a) STATUS TEST CHECK: Is the lead testing if you're legitimate?
-   - "What is this?" / "Who is this?" / "Where did you get my email?"
-   - Short, terse, clipped sentences
-   - Suspicious or guarded tone
-   → If YES, you are being evaluated. Do NOT explain the product. Diagnose the pain instead.
+When the lead shows ANY positive or neutral signal, your ONLY job is to:
+1. Acknowledge their response briefly
+2. Deliver the demo link: {{DEMO_LINK}}
 
-b) POWER DYNAMIC CHECK: Is there an authority figure involved?
-   - CC'd partner, broker, team lead, or assistant
-   - "My assistant handles that" / "My broker wants to know..."
-   - "We need to discuss this as a team"
-   → If YES, acknowledge the authority structure. Pivot to office-wide ROI.
-
-c) TENSION LEVEL ANALYSIS:
-   - HIGH TENSION: Short sentences, single words, curt replies ("I do", "No", "Stop")
-   - LOW TENSION: Longer explanations, multiple sentences, relaxed tone
-   → Match their energy. Mirror their length exactly.
-
-CRITICAL RULE: NEVER reply with only the lead's name, a single-word greeting, or a simple acknowledgment. Mirroring applies to the LENGTH and ENERGY of the response, NOT the content. Even for the briefest inputs, the response MUST include a value-driven statement, a pain-point reminder, or a curiosity question aligned with the Auditor Frame. Every response must push the lead toward the 'lead-leak' realization or a trial.
-
-d) PAIN SIGNAL CHECK: Are they already aware of the problem?
-   - "I miss leads all the time" / "Response time kills me" / "We lose deals to faster agents"
-   → If PAIN_AWARE, skip the pitch. They're already sold on the problem.
+No discovery questions. No "Do you think speed matters?" No belief profiling.
+The demo link is the focal point — make it stand out.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 2: THE AUDITOR FRAME — RULES BY INTENT
+BREVITY MIRRORING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-STATUS_TEST:
-- DO NOT explain what the service is
-- Instead, diagnose the lead-leak problem directly
-- Example: "Simple: most agents lose ~20% of their leads during showings because they can't reply in 2 minutes. We plug that hole."
-- Match their brevity. If they sent 5 words, reply with 10 words max.
-- Authority signal: If they ask "who is this," just give your first name, don't explain the company.
+Match the lead's length and energy:
+- They sent 1 word → 1-2 words + demo link
+- They sent 1 sentence → 1-2 sentences + demo link
+- They sent a paragraph → brief acknowledgment + demo link
 
-AUTHORITY_SIGNAL (partner/broker/team involved):
-- Acknowledge the team/partner explicitly: "Tell your partner I said hi."
-- Pivot to OFFICE efficiency: "Most teams we work with have the same issue — the whole office loses when one agent is tied up."
-- DO NOT pitch to just one person when a team is involved.
-
-PAIN_AWARE:
-- Skip the discovery questions entirely
-- They already feel the pain — go straight to validation + soft next step
-- Example: "Yeah, that lag kills. We see it all the time. Happy to show you how we handle it for a week, on us."
-- Only offer free trial if they're PAIN_AWARE OR explicitly INTERESTED. Never on first contact otherwise.
+The demo link {{DEMO_LINK}} MUST appear in the reply for positive/neutral intents.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 3: ANTI-BOT FILTER — HARD CONSTRAINTS
+INTENT CLASSIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Classify into ONE of these labels:
+
+INTERESTED         : Explicitly interested, wants to know more, asks questions.
+PAIN_AWARE         : Explicitly admits to losing leads, response lag, or missed deals.
+ACKNOWLEDGMENT_ONLY: Brief non-action reply ("got it", "ok", "thanks").
+ASKS_PRICE         : Asking about pricing/cost.
+ASKS_DETAILS       : Asking how the system works.
+ASKS_IDENTITY      : Asking who you are.
+AGENT_HANDLES      : They handle replies themselves (e.g., "Me", "I do").
+NOBODY_HANDLES     : Nobody handles it, they miss leads, it's a problem.
+ASSISTANT_HANDLES  : They have assistant/team/coordinator handling inbound.
+NOT_RELEVANT       : Not a real estate agent.
+CONFUSED           : Doesn't understand the email's purpose.
+PASS_UNSUB         : Explicitly declining/removal request.
+NEGATIVE_OBJECTION : Upset, frustrated, or angry.
+UNKNOWN            : Cannot determine intent.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REPLY RULES BY INTENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+INTERESTED, PAIN_AWARE, ACKNOWLEDGMENT_ONLY:
+→ MUST include {{DEMO_LINK}} in reply_html
+→ Keep it brief and direct
+→ Example: "Great — here's a quick demo: {{DEMO_LINK}}"
+→ Example: "Totally get it. See for yourself: {{DEMO_LINK}}"
+
+ASKS_PRICE, ASKS_DETAILS:
+→ Include {{DEMO_LINK}} — the demo answers these questions
+→ Example: "Here's how it works: {{DEMO_LINK}}"
+
+ASKS_IDENTITY:
+→ Introduce yourself briefly, then {{DEMO_LINK}}
+→ Example: "I'm {my_name}. Quick overview: {{DEMO_LINK}}"
+
+AGENT_HANDLES, NOBODY_HANDLES, ASSISTANT_HANDLES:
+→ Acknowledge their situation, then {{DEMO_LINK}}
+→ These are positive signals — they're engaging
+
+PASS_UNSUB, NEGATIVE_OBJECTION, NOT_RELEVANT:
+→ Do NOT include demo link
+→ Handle gracefully per the intent
+
+CONFUSED, UNKNOWN:
+→ Do NOT include demo link
+→ Offer help or clarification
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ANTI-BOT FILTER — HARD CONSTRAINTS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ABSOLUTELY FORBIDDEN — any of these = reject the reply:
@@ -224,73 +268,24 @@ ABSOLUTELY FORBIDDEN — any of these = reject the reply:
 - "Best regards", "Kind regards", "Warm regards"
 - Any phrase that sounds like it came from a template
 
-BREVITY MIRRORING (non-negotiable):
-- They sent 1 sentence → you send 1 sentence
-- They sent 3 words → you send ~6 words max
-- Exception: If they're PAIN_AWARE, you can go slightly longer to validate their pain
-
-NO "BEGGAR ENERGY":
-- Free trial is NOT offered unless:
-  a) Intent is INTERESTED, PAIN_AWARE, or ASKS_PRICE/DETAILS, OR
-  b) Belief signal is BELIEF_HIGH AND intent is AGENT_HANDLES
-- Never say "would you like to try it free?" — it sounds desperate
-- If offering: "We can run your next batch free" or "Worth a test run on your next few leads"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 4: INTENT CLASSIFICATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Classify into ONE of these labels:
-
-AGENT_HANDLES      : They handle replies themselves (e.g., "Me", "I do", "I answer").
-NOBODY_HANDLES     : Nobody handles it, they miss leads, it's a problem.
-ASSISTANT_HANDLES  : They have assistant/team/coordinator handling inbound.
-INTERESTED         : Explicitly interested, wants to know more.
-ASKS_PRICE         : Asking about pricing/cost.
-ASKS_DETAILS       : Asking how the system works.
-ASKS_IDENTITY      : Asking who you are (use STATUS_TEST logic instead).
-NOT_RELEVANT       : Not a real estate agent.
-CONFUSED           : Doesn't understand the email's purpose.
-ACKNOWLEDGMENT_ONLY: Brief non-action reply ("got it", "ok").
-PASS_UNSUB         : Explicitly declining/removal request.
-NEGATIVE_OBJECTION : Upset, frustrated, or angry.
-UNKNOWN            : Cannot determine intent.
-
-// NEW AUDITOR FRAME INTENTS (HIGH_NUANCE — use LLM reply only, no templates):
-STATUS_TEST        : Testing legitimacy with "What is this?", "Who is this?", or suspicious/guarded tone.
-AUTHORITY_SIGNAL   : Partner/broker/team mentioned or CC'd; power dynamic involved.
-PAIN_AWARE         : Explicitly admits to losing leads, response lag, or missed deals.
-AGREED_TO_SEE      : Lead explicitly agrees to see a demo or system. Trigger phrases: "Yes", "Sure", "Show me", "Okay", "Let's do it", or similar affirmative responses to a demo/trial offer. When classified, bot should return reply_html as "SILENT_HANDOFF" — this signals admin to take over for personalized close. DO NOT generate a standard reply.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 5: BELIEF SIGNAL
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-BELIEF_HIGH   : Response time = deals ("First responder usually wins", "Speed is everything")
-BELIEF_MEDIUM : Matters but isn't everything ("Relationships matter too", "Price matters more")
-BELIEF_LOW    : Doesn't think speed matters much ("Leads wait", "Reputation wins")
-BELIEF_UNKNOWN: Off-topic or unclear about speed beliefs
-
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT FORMAT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Return ONLY valid JSON:
 {{
-  "lead_psychology": "2-3 sentences on what you observed about their status/power dynamic/tension/psychological state",
   "intent": "INTENT_LABEL",
-  "belief_signal": "BELIEF_SIGNAL_LABEL",
   "reasoning": "Why you classified this intent",
-  "reply_html": "Your reply only — no markdown, no explanation. Plain text with {my_name} signature."
+  "reply_html": "Your reply with {{DEMO_LINK}} placeholder where appropriate. No markdown."
 }}
 """
 
-def _groq_analyze_reply(text: str, property_address: str = "your service area", my_name: str = "the team", conversation_state: dict | None = None, gen_params: dict | None = None, variant_tag: str | None = None, chosen_question: str | None = None) -> dict | None:
+def _groq_analyze_reply(text: str, property_address: str = "your service area", my_name: str = "the team", conversation_state: dict | None = None, gen_params: dict | None = None) -> dict | None:
     """
     Primary intelligence layer.
     Calls Groq to READ the reply, classify intent properly, and generate
     a contextually appropriate response. Returns:
-    { intent, belief_signal, reasoning, reply_html }
+    { intent, reasoning, reply_html }
     Returns None if all keys fail or the model returns unusable output.
     Uses model rotation for rate limit handling.
     """
@@ -308,27 +303,6 @@ def _groq_analyze_reply(text: str, property_address: str = "your service area", 
     }
     style_instr = style_mode_instructions.get(gp['style_mode'], style_mode_instructions['brief_casual'])
 
-    variant_instructions = ""
-    if variant_tag == "group_a_observation":
-        variant_instructions = f"""
-VARIANT A INSTRUCTIONS:
-- Start exactly with: "{gp['opener']}"
-- Make one short observation about how common or respectable their stance is.
-- Do NOT ask a question.
-- Keep the response under 2 sentences.
-- No AI/software jargon.
-"""
-    elif variant_tag == "group_b_belief_question" and chosen_question:
-        variant_instructions = f"""
-VARIANT B INSTRUCTIONS:
-- Start exactly with: "{gp['opener']}"
-- Append this question exactly as written verbatim: "{chosen_question}"
-- Do NOT change any words in the question.
-- Do NOT add another question or extra sentences.
-- Keep the tone casual, like an iPhone text.
-- Under 3 sentences total.
-"""
-
     state_str = json.dumps(conversation_state or {}, indent=2)
     system_prompt = _GROQ_SYSTEM_PROMPT.format(
         property_address=property_address,
@@ -337,9 +311,7 @@ VARIANT B INSTRUCTIONS:
         style_mode=gp['style_mode'],
         opener=gp['opener'],
         situation=gp['situation'],
-        ask_question=gp['ask_question'],
         style_mode_instruction=style_instr,
-        variant_instructions=variant_instructions
     )
 
     # Rotate through all model/key combinations
@@ -380,14 +352,11 @@ VARIANT B INSTRUCTIONS:
                     parsed  = json.loads(cleaned)
 
                 intent = parsed.get("intent", "").strip().upper()
-                belief_signal = parsed.get("belief_signal", "BELIEF_UNKNOWN").strip().upper()
                 if intent in _GROQ_VALID_INTENTS:
                     return {
-                        "intent":          intent,
-                        "belief_signal":   belief_signal if belief_signal in BELIEF_SIGNALS else "BELIEF_UNKNOWN",
-                        "lead_psychology": parsed.get("lead_psychology", "")[:500],
-                        "reasoning":       parsed.get("reasoning", "")[:500],
-                        "reply_html":      parsed.get("reply_html", "")[:1000],
+                        "intent":     intent,
+                        "reasoning":  parsed.get("reasoning", "")[:500],
+                        "reply_html": parsed.get("reply_html", "")[:1000],
                     }
                 print(f"[GROQ ANALYZE] unexpected intent: {intent!r}")
 
@@ -585,87 +554,74 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
 def _tmpl_ps() -> str:
     return "\n\nP.S. If you'd rather not hear from me, just let me know and I'll hop off your inbox."
 
-def _tmpl_asks_identity(my_name: str, gp: dict) -> str:
-    body = f"{gp['opener']} We help with speed-to-lead by handling inbound client leads instantly when you're busy {gp['situation']}. "
-    body += "We can actually handle your next 5-10 client leads free so you see how it works — zero risk."
+def _tmpl_asks_identity(my_name: str, gp: dict, demo_link: str = None) -> str:
+    link = demo_link or 'https://replyzeai.com/goods/templates/demo'
+    body = f"I'm {my_name}. We handle inbound leads instantly when you're busy {gp['situation']}. Quick overview: {link}"
     return f"{body}\n\n— {my_name}"
 
-def _tmpl_agent_handles(my_name: str, gp: dict, variant_tag: str = None, chosen_question: str = None) -> str:
-    """Value-First: Contrast Bridge approach — acknowledge, contrast with lead-leak risk, soft close."""
-    if variant_tag == "group_a_observation":
-        return f"{gp['opener']} Most agents handle it themselves, but the lead-leak still happens {gp['situation']}. We stopped that. Worth a 2-min look?\n\n— {my_name}"
-    elif variant_tag == "group_b_belief_question" and chosen_question:
-        return f"{gp['opener']} Most agents handle it themselves, but the lead-leak still happens {gp['situation']}. We stopped that.\n\n{chosen_question}\n\n— {my_name}"
+def _tmpl_agent_handles(my_name: str, gp: dict, demo_link: str = None) -> str:
+    """Concierge response for agents who handle their own replies."""
+    if demo_link:
+        return f"{gp['opener']} Makes sense. Here's a quick look: {demo_link}\n\n— {my_name}"
+    return f"{gp['opener']} Makes sense. Worth a look: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
-    # Default legacy fallback if no variant is specified
-    if gp['style_mode'] == 'very_short':
-        return f"{gp['opener']} Most agents handle it themselves, but the lead-leak still happens {gp['situation']}. We stopped that. Worth a 2-min look?\n\n— {my_name}"
+def _tmpl_nobody_handles(my_name: str, gp: dict, demo_link: str = None) -> str:
+    """Concierge response for leads who admit they miss leads."""
+    if demo_link:
+        return f"{gp['opener']} That's where it gets costly — the lead just emails the next agent. Here's how we fix it: {demo_link}\n\n— {my_name}"
+    return f"{gp['opener']} That's where it gets costly — the lead just emails the next agent. Here's how we fix it: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
-    body = f"{gp['opener']} Most agents handle it themselves, but the lead-leak still happens {gp['situation']}. We stopped that."
-    if gp['ask_question']:
-        body += "\n\nWorth a 2-min look?"
-    return f"{body}\n\n— {my_name}"
+def _tmpl_assistant_handles(my_name: str, gp: dict, demo_link: str = None) -> str:
+    """Concierge response for leads with assistant/team support."""
+    if demo_link:
+        return f"{gp['opener']} Helpful to have support. Sometimes things still slip through though. Quick overview: {demo_link}\n\n— {my_name}"
+    return f"{gp['opener']} Helpful to have support. Sometimes things still slip through though. Quick overview: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
-def _tmpl_nobody_handles(my_name: str, gp: dict) -> str:
-    body = f"{gp['opener']} Missed leads usually mean lost deals — especially {gp['situation']}, the lead just emails the next agent."
-    if gp['ask_question']:
-        body += "\n\nDo leads ever sit for a bit during busy hours or do you usually get to them pretty fast?"
-    return f"{body}\n\n— {my_name}"
+def _tmpl_interested(my_name: str, gp: dict, demo_link: str = None) -> str:
+    """Concierge response for interested leads — deliver the demo."""
+    if demo_link:
+        return f"Great! Here's a quick demo: {demo_link}\n\n— {my_name}"
+    return f"Great! Here's a quick demo: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
-def _tmpl_assistant_handles(my_name: str, gp: dict) -> str:
-    body = f"{gp['opener']} A lot of agents I talk to already have someone handling the inbox."
-    if gp['ask_question']:
-        body += f"\n\nOut of curiosity, do leads ever still slip through {gp['situation']} or is response time pretty locked in?"
-    return f"{body}\n\n— {my_name}"
+def _tmpl_asks_price(my_name: str, gp: dict, demo_link: str = None) -> str:
+    """Concierge response for price questions — deliver the demo."""
+    if demo_link:
+        return f"It depends on your volume, but it usually pays for itself with the first saved lead. Here's a quick example: {demo_link}\n\n— {my_name}"
+    return f"It depends on your volume, but it usually pays for itself with the first saved lead. Here's a quick example: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
-def _tmpl_interested(my_name: str, gp: dict) -> str:
-    body = f"Mainly helps with response time. If someone emails {gp['situation']}, they get an instant response until you jump back in."
-    body += "\n\nWanna try it on your next batch of client leads free? We can run 5-10 at no cost so you see the difference."
-    return f"{body}\n\n— {my_name}"
-
-def _tmpl_asks_price(my_name: str, gp: dict) -> str:
-    """Assertive Price Pivot — direct value statement, no deflecting."""
-    body = f"{gp['opener']} It depends on your volume, but it usually pays for itself with the first saved lead. Want to see a quick example of how it works for your listings?"
-    return f"{body}\n\n— {my_name}"
-
-def _tmpl_asks_details(my_name: str, gp: dict) -> str:
-    body = f"It's zero manual work for you. We help with speed-to-lead so client leads get answered {gp['situation']} while you're busy."
-    if gp['ask_question']:
-        body += "\n\nHappy to show you how it works if helpful?"
-    return f"{body}\n\n— {my_name}"
+def _tmpl_asks_details(my_name: str, gp: dict, demo_link: str = None) -> str:
+    """Concierge response for detail questions — deliver the demo."""
+    if demo_link:
+        return f"Zero manual work for you. Here's how it works: {demo_link}\n\n— {my_name}"
+    return f"Zero manual work for you. Here's how it works: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
 def _tmpl_not_relevant(my_name: str, property_address: str, gp: dict) -> str:
+    """Not relevant — no demo link."""
     body = f"{gp['opener']} Looks like you might be in a different type of business — we're specifically looking for real estate agents."
-    if gp['ask_question']:
-        body += "\n\nDo you happen to do any real estate on the side?"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_confused(my_name: str, property_address: str, gp: dict) -> str:
-    body = f"Sorry for the confusion! We were asking about how you handle inbound leads — like when someone's ready to tour a property or has a question about a listing."
-    if gp['ask_question']:
-        body += "\n\nDo you usually get to those right away or once you're done showing?"
+    """Confused — no demo link, offer help."""
+    body = f"Sorry for the confusion! We help real estate agents respond to inbound leads faster. Happy to clarify if you have questions."
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_pass_unsub() -> str:
-    return (
-        "Understood — removing you from our list now. "
-        "Good luck with the listings!"
-    )
+    """Unsubscribe — no demo link."""
+    return "Understood — removing you from our list now. Good luck with the listings!"
 
 def _tmpl_negative_objection() -> str:
-    return (
-        "I apologize for the confusion. I'll correct my records right away and won't reach out again."
-    )
+    """Negative objection — no demo link."""
+    return "I apologize for the confusion. I'll correct my records right away and won't reach out again."
 
-def _tmpl_acknowledgment_only(my_name: str, gp: dict) -> str:
-    """Pattern Interrupt — re-engage with high-leverage curiosity question."""
-    body = f"{gp['opener']} Fair enough. Just curious — do you think the first agent to respond usually wins the deal, or do people still shop around?"
-    return f"{body}\n\n— {my_name}"
+def _tmpl_acknowledgment_only(my_name: str, gp: dict, demo_link: str = None) -> str:
+    """Concierge response for acknowledgments — deliver the demo."""
+    if demo_link:
+        return f"{gp['opener']} Quick overview for you: {demo_link}\n\n— {my_name}"
+    return f"{gp['opener']} Quick overview for you: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
 def _tmpl_unknown(my_name: str, gp: dict) -> str:
-    return (
-        f"{gp['opener']} Thanks — got your message. I'll get back to you with more details shortly.\n\n— {my_name}"
-    )
+    """Unknown intent — no demo link."""
+    return f"{gp['opener']} Thanks — got your message. I'll get back to you with more details shortly.\n\n— {my_name}"
 
 #── Gmail helpers ─────────────────────────────────────────────────────────────
 def _get_header(headers: list, name: str) -> str:
@@ -840,12 +796,12 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         msg_id=orig_msg_id, channel="smtp_imap"
     )
 
-    intent          = analysis['intent']
-    reasoning       = analysis['reasoning']
-    variant_tag     = analysis['variant_tag']
-    chosen_question = analysis['chosen_question']
-    groq_result     = analysis['groq_result']
-    gp              = analysis['gp']
+    intent      = analysis['intent']
+    reasoning   = analysis['reasoning']
+    groq_result = analysis['groq_result']
+    gp          = analysis['gp']
+    demo_link   = analysis['demo_link']
+    queue_ids   = analysis['queue_ids']
 
     _log_audit('REPLY_RECEIVED', {
         'from':        from_email,
@@ -858,109 +814,21 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         'channel':     'smtp_imap',
     })
 
-    # ── Step 6: Choose reply (mirrors Gmail path exactly) ─────────────────────
-    groq_reply          = (groq_result or {}).get('reply_html', '').strip()
+    # ── Step 6: Choose reply ───────────────────────────────────────────────────
+    groq_reply   = (groq_result or {}).get("reply_html", "").strip()
     reply_html: str | None = None
 
-    # ── HIGH_NUANCE Intents: LLM reply ONLY — no template fallback ─────────────
-    if intent == 'AGREED_TO_SEE':
-        # SILENT HANDOFF: Lead agreed to demo → bot stays silent, admin is notified
-        reply_html = None  # No auto-reply to the lead
-        _log_audit('AGREED_TO_SEE_SILENT_HANDOFF', {
-            'from': from_email, 'account': account['email'],
-            'subject': subject, 'raw_reply': body_text[:200],
-            'lead_psychology': groq_result.get('lead_psychology', '') if groq_result else '',
-        })
-        _update_lead_status(from_email, 'agreed_to_see')
-        # Trigger high-priority admin notification for personalized close
-        try:
-            notify(
-                '🔥 HOT LEAD — AGREED TO SEE',
-                f'Lead {from_email} agreed to see demo.\nSubject: {subject}\nFrom: {account["email"]}\n\nSend personalized demo link NOW.',
-                priority='high',
-                tags='fire,wave'
-            )
-        except Exception as notify_err:
-            print(f"[NOTIFY ERROR] {notify_err}")
-
-    elif intent in HIGH_NUANCE_INTENTS:
-        # Other HIGH_NUANCE intents: use LLM reply only
-        if not groq_reply:
-            # If LLM failed, fall back to a minimal safe response
-            groq_reply = _tmpl_unknown(my_name, gp)
-        reply_html = groq_reply
-        _log_audit(f'HIGH_NUANCE_{intent}', {
-            'from': from_email, 'account': account['email'],
-            'lead_psychology': groq_result.get('lead_psychology', '') if groq_result else '',
-        })
-        _update_lead_status(from_email, intent.lower())
-
-    elif intent == 'INTERESTED':
-        # SILENT HANDOFF: Lead expressed interest → bot stays silent, admin is notified
-        reply_html = None  # No auto-reply to the lead
-        _log_audit('INTERESTED_SILENT_HANDOFF', {
-            'from': from_email, 'account': account['email'],
-            'subject': subject, 'raw_reply': body_text[:200],
-            'lead_psychology': groq_result.get('lead_psychology', '') if groq_result else '',
-        })
-        _update_lead_status(from_email, 'interested')
-        # Trigger high-priority admin notification for personalized close
-        try:
-            notify(
-                '🔥 HOT LEAD — EXPRESSED INTEREST',
-                f'Lead {from_email} is interested!\nSubject: {subject}\nFrom: {account["email"]}\n\nTake over the conversation NOW.',
-                priority='high',
-                tags='fire,wave'
-            )
-        except Exception as notify_err:
-            print(f"[NOTIFY ERROR] {notify_err}")
-
-    elif intent == 'AGENT_HANDLES':
-        reply_html = groq_reply or _tmpl_agent_handles(my_name, gp, variant_tag=variant_tag, chosen_question=chosen_question)
-        _log_audit('AGENT_HANDLES', {
-            'from': from_email, 'account': account['email'],
-        })
-        _update_lead_status(from_email, 'agent_handles')
-
-    elif intent == 'NOBODY_HANDLES':
-        reply_html = groq_reply or _tmpl_nobody_handles(my_name, gp)
-        _log_audit('NOBODY_HANDLES', {
-            'from': from_email, 'account': account['email'],
-        })
-        _update_lead_status(from_email, 'nobody_handles')
-
-    elif intent == 'ASSISTANT_HANDLES':
-        reply_html = groq_reply or _tmpl_assistant_handles(my_name, gp)
-        _log_audit('ASSISTANT_HANDLES', {
-            'from': from_email, 'account': account['email'],
-        })
-        _update_lead_status(from_email, 'assistant_handles')
-
-    # INTERESTED: Handled as SILENT HANDOFF above - admin takes over
-
-    elif intent == 'ASKS_IDENTITY':
-        reply_html = groq_reply or _tmpl_asks_identity(my_name, gp)
-        _log_audit('ASKS_IDENTITY', {
-            'from': from_email, 'reasoning': reasoning, 'account': account['email'],
-        })
-
-    elif intent == 'ACKNOWLEDGMENT_ONLY':
-        # Pattern Interrupt: re-engage with curiosity question instead of staying silent
-        reply_html = groq_reply or _tmpl_acknowledgment_only(my_name, gp)
-        _log_audit('ACKNOWLEDGMENT_ONLY', {
-            'from': from_email, 'reasoning': reasoning, 'account': account['email'],
-        })
-
-    elif intent == 'ASKS_PRICE':
-        reply_html = groq_reply or _tmpl_asks_price(my_name, gp)
-
-    elif intent == 'ASKS_DETAILS':
-        reply_html = groq_reply or _tmpl_asks_details(my_name, gp)
-
-    elif intent == 'PASS_UNSUB':
+    if intent == 'PASS_UNSUB':
         reply_html = groq_reply or _tmpl_pass_unsub()
         _handle_unsub(from_email)
         _log_audit('UNSUBSCRIBED', {'email': from_email})
+
+    elif intent == 'NEGATIVE_OBJECTION':
+        reply_html = groq_reply or _tmpl_negative_objection()
+        _handle_unsub(from_email)
+        _log_audit('NEGATIVE_OBJECTION', {
+            'from': from_email, 'reasoning': reasoning, 'account': account['email'],
+        })
 
     elif intent == 'NOT_RELEVANT':
         reply_html = groq_reply or _tmpl_not_relevant(my_name, property_address, gp)
@@ -976,20 +844,57 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
         })
         _update_lead_status(from_email, 'confused')
 
-    elif intent == 'NEGATIVE_OBJECTION':
-        reply_html = groq_reply or _tmpl_negative_objection()
-        _handle_unsub(from_email)
-        _log_audit('NEGATIVE_OBJECTION', {
+    else:
+        # All positive/neutral intents: Groq reply first, then inject demo link
+        reply_html = groq_reply
+
+        if not reply_html:
+            # Fall back to templates with demo link
+            if intent == 'INTERESTED':
+                reply_html = _tmpl_interested(my_name, gp, demo_link)
+            elif intent == 'PAIN_AWARE':
+                reply_html = _tmpl_nobody_handles(my_name, gp, demo_link)
+            elif intent == 'ACKNOWLEDGMENT_ONLY':
+                reply_html = _tmpl_acknowledgment_only(my_name, gp, demo_link)
+            elif intent == 'ASKS_PRICE':
+                reply_html = _tmpl_asks_price(my_name, gp, demo_link)
+            elif intent == 'ASKS_DETAILS':
+                reply_html = _tmpl_asks_details(my_name, gp, demo_link)
+            elif intent == 'ASKS_IDENTITY':
+                reply_html = _tmpl_asks_identity(my_name, gp).replace(
+                    'https://replyzeai.com/goods/templates/demo',
+                    demo_link or 'https://replyzeai.com/goods/templates/demo'
+                )
+            elif intent == 'AGENT_HANDLES':
+                reply_html = _tmpl_agent_handles(my_name, gp, demo_link)
+            elif intent == 'NOBODY_HANDLES':
+                reply_html = _tmpl_nobody_handles(my_name, gp, demo_link)
+            elif intent == 'ASSISTANT_HANDLES':
+                reply_html = _tmpl_assistant_handles(my_name, gp, demo_link)
+            else:
+                reply_html = _tmpl_unknown(my_name, gp)
+
+        # Inject demo link if Groq reply contains {{DEMO_LINK}} placeholder
+        if demo_link and reply_html and '{{DEMO_LINK}}' in reply_html:
+            reply_html = reply_html.replace('{{DEMO_LINK}}', demo_link)
+            print(f"  [{from_email}] Demo link injected into Groq reply")
+
+        # Log DEMO_DELIVERED handoff notification
+        if demo_link and intent in DEMO_LINK_INTENTS:
+            _log_audit('DEMO_DELIVERED', {
+                "from":       from_email,
+                "lead_id":    lead['id'],
+                "intent":     intent,
+                "demo_link":  demo_link,
+                "account":    account['email'],
+            })
+            _update_lead_status(from_email, f'{intent.lower()}_demo_sent')
+
+        _log_audit(f'REPLY_{intent}', {
             'from': from_email, 'reasoning': reasoning, 'account': account['email'],
         })
 
-    else:
-        reply_html = groq_reply or _tmpl_unknown(my_name, gp)
-        create_ops_ticket(from_email, subject, body_text, intent)
-        _create_human_review_ticket(from_email, subject, body_text, intent, reasoning)
-        _log_audit('OPS_TICKET_CREATED', {'from': from_email, 'intent': intent})
-
-    # ── Step 7: Enqueue reply ────────────────────────────────
+    # ── Step 7: Enqueue reply ─────────────────────────────────────────────────
     _store_responded_lead(lead['id'], from_email, intent, body_text)
     _clear_pending_followups(lead['id'])
 
@@ -1007,7 +912,7 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
 
     # Determine if product was introduced in this reply
     pitched = (intent in ['INTERESTED', 'ASKS_PRICE', 'ASKS_DETAILS']) or (lead.get('product_introduced', False))
-    _update_lead_state(lead['id'], intent, product_introduced=pitched, belief_variant=variant_tag)
+    _update_lead_state(lead['id'], intent, product_introduced=pitched)
 
     _mark_processed(
         orig_msg_id, account['email'], from_email,
@@ -1269,10 +1174,23 @@ def _clear_pending_followups(lead_id: int):
 
 def _analyze_and_handle_reply(from_email: str, body_text: str, lead: dict, my_name: str, property_address: str, msg_id: str, thread_id: str = None, channel: str = "gmail"):
     """
-    Shared logic for analyzing a reply, assigning A/B test variants,
-    and generating the response. Used by both Gmail and IMAP paths.
+    Shared logic for analyzing a reply and generating the response.
+    Used by both Gmail and IMAP paths.
     """
     gp = get_generation_params()
+
+    # ── Step 1: Lookup email_queue for demo link IDs ──────────────────────────
+    queue_ids = _get_email_queue_ids(from_email)
+    demo_link = None
+    if queue_ids:
+        demo_link = _build_demo_link(
+            lead_id=queue_ids['lead_id'],
+            campaign_id=queue_ids['campaign_id'],
+            eqid=queue_ids['eqid']
+        )
+        print(f"  [{from_email}] Demo link: {demo_link}")
+    else:
+        print(f"  [{from_email}] No email_queue entry found — demo link unavailable")
 
     conversation_state = {
         "reply_count": lead.get("reply_count", 0),
@@ -1280,52 +1198,28 @@ def _analyze_and_handle_reply(from_email: str, body_text: str, lead: dict, my_na
         "last_intent": lead.get("last_intent")
     }
 
-    # ── Step 1: Groq analyze (Phase 1: Intent classification) ─────────────────
+    # ── Step 2: Groq analyze ──────────────────────────────────────────────────
     print(f"  [{from_email}] calling Groq analyze ({channel}) …")
     groq_result = _groq_analyze_reply(
         body_text, property_address=property_address, my_name=my_name,
         conversation_state=conversation_state, gen_params=gp
     )
 
-    # ── Step 2: Final intent ──────────────────────────────────────────────────
-    intent        = classify_intent(body_text, groq_result)
-    belief_signal = (groq_result or {}).get("belief_signal", "BELIEF_UNKNOWN")
-    reasoning     = groq_result.get('reasoning', '') if groq_result else ''
-    confidence    = 0.9 if groq_result else 0.5
-    print(f"  [{from_email}] intent={intent} belief_signal={belief_signal}")
+    # ── Step 3: Final intent ──────────────────────────────────────────────────
+    intent     = classify_intent(body_text, groq_result)
+    reasoning  = groq_result.get('reasoning', '') if groq_result else ''
+    confidence = 0.9 if groq_result else 0.5
+    print(f"  [{from_email}] intent={intent}")
 
-    # ── Step 3: Variant Assignment ───────────────────────────────────────────
-    variant_tag = lead.get("belief_variant")
-    chosen_question = None
-    if intent == "AGENT_HANDLES":
-        if not variant_tag:
-            variant_tag = "group_b_belief_question" if random.random() < BELIEF_QUESTION_RATE else "group_a_observation"
-            print(f"  [{from_email}] Assigned new variant: {variant_tag}")
-        else:
-            print(f"  [{from_email}] Using existing variant: {variant_tag}")
-
-        if variant_tag == "group_b_belief_question":
-            chosen_question = random.choice(BELIEF_QUESTIONS)
-
-    # ── Step 4: Re-run Groq with variant instructions (if AGENT_HANDLES) ──────
-    if intent == "AGENT_HANDLES" and variant_tag:
-        print(f"  [{from_email}] Re-calling Groq with variant instructions …")
-        groq_result = _groq_analyze_reply(
-            body_text, property_address=property_address, my_name=my_name,
-            conversation_state=conversation_state, gen_params=gp,
-            variant_tag=variant_tag, chosen_question=chosen_question
-        )
-
-    # ── Step 5: Decision Logging ──────────────────────────────────────────────
+    # ── Step 4: Decision Logging ──────────────────────────────────────────────
     metadata = groq_result or {}
     metadata.update({
-        "variant_tag":     variant_tag,
-        "belief_signal":   belief_signal,
-        "intent":          intent,
-        "lead_id":         lead['id'],
-        "thread_id":       thread_id,
-        "msg_id":          msg_id,
-        "channel":         channel
+        "intent":    intent,
+        "lead_id":   lead['id'],
+        "thread_id": thread_id,
+        "msg_id":    msg_id,
+        "channel":   channel,
+        "demo_link": demo_link,
     })
 
     _log_agent_decision(
@@ -1334,13 +1228,12 @@ def _analyze_and_handle_reply(from_email: str, body_text: str, lead: dict, my_na
     )
 
     return {
-        "intent": intent,
-        "belief_signal": belief_signal,
-        "reasoning": reasoning,
-        "variant_tag": variant_tag,
-        "chosen_question": chosen_question,
+        "intent":     intent,
+        "reasoning":  reasoning,
         "groq_result": groq_result,
-        "gp": gp
+        "gp":         gp,
+        "demo_link":  demo_link,
+        "queue_ids":  queue_ids,
     }
 
 #── Core message processor ────────────────────────────────────────────────────
@@ -1384,140 +1277,40 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         msg_id=gmail_msg_id, thread_id=thread_id, channel="gmail"
     )
 
-    intent          = analysis['intent']
-    reasoning       = analysis['reasoning']
-    variant_tag     = analysis['variant_tag']
-    chosen_question = analysis['chosen_question']
-    groq_result     = analysis['groq_result']
-    gp              = analysis['gp']
+    intent      = analysis['intent']
+    reasoning   = analysis['reasoning']
+    groq_result = analysis['groq_result']
+    gp          = analysis['gp']
+    demo_link   = analysis['demo_link']
+    queue_ids   = analysis['queue_ids']
 
     _log_audit('REPLY_RECEIVED', {
-        "from":         from_email,
-        "subject":      subject,
-        "intent":       intent,
-        "reasoning":    reasoning,
-        "raw_snippet":  body_text[:300],
+        "from":        from_email,
+        "subject":     subject,
+        "intent":      intent,
+        "reasoning":   reasoning,
+        "raw_snippet": body_text[:300],
         "gmail_msg_id": gmail_msg_id,
-        "account":      account['email'],
+        "account":     account['email'],
     })
 
     # ── Step 6: Choose reply ───────────────────────────────────────────────────
-    # Prefer Groq's generated reply when available; fall back to static templates.
     groq_reply   = (groq_result or {}).get("reply_html", "").strip()
     reply_html: str | None = None
 
-    # ── HIGH_NUANCE Intents: LLM reply ONLY — no template fallback ─────────────
-    if intent == 'AGREED_TO_SEE':
-        # SILENT HANDOFF: Lead agreed to demo → bot stays silent, admin is notified
-        reply_html = None  # No auto-reply to the lead
-        _log_audit('AGREED_TO_SEE_SILENT_HANDOFF', {
-            "from":             from_email,
-            "account":          account['email'],
-            "subject":          subject,
-            "raw_reply":        body_text[:200],
-            "lead_psychology":  groq_result.get('lead_psychology', '') if groq_result else '',
-        })
-        _update_lead_status(from_email, 'agreed_to_see')
-        # Trigger high-priority admin notification for personalized close
-        try:
-            notify(
-                '🔥 HOT LEAD — AGREED TO SEE',
-                f'Lead {from_email} agreed to see demo.\nSubject: {subject}\nFrom: {account["email"]}\n\nSend personalized demo link NOW.',
-                priority='high',
-                tags='fire,wave'
-            )
-        except Exception as notify_err:
-            print(f"[NOTIFY ERROR] {notify_err}")
-
-    elif intent == 'INTERESTED':
-        # SILENT HANDOFF: Lead expressed interest → bot stays silent, admin is notified
-        reply_html = None  # No auto-reply to the lead
-        _log_audit('INTERESTED_SILENT_HANDOFF', {
-            "from":             from_email,
-            "account":          account['email'],
-            "subject":          subject,
-            "raw_reply":        body_text[:200],
-            "lead_psychology":  groq_result.get('lead_psychology', '') if groq_result else '',
-        })
-        _update_lead_status(from_email, 'interested')
-        # Trigger high-priority admin notification for personalized close
-        try:
-            notify(
-                '🔥 HOT LEAD — EXPRESSED INTEREST',
-                f'Lead {from_email} is interested!\nSubject: {subject}\nFrom: {account["email"]}\n\nTake over the conversation NOW.',
-                priority='high',
-                tags='fire,wave'
-            )
-        except Exception as notify_err:
-            print(f"[NOTIFY ERROR] {notify_err}")
-
-    elif intent in HIGH_NUANCE_INTENTS:
-        # Other HIGH_NUANCE intents: use LLM reply only
-        if not groq_reply:
-            # If LLM failed, fall back to a minimal safe response
-            groq_reply = _tmpl_unknown(my_name, gp)
-        reply_html = groq_reply
-        _log_audit(f'HIGH_NUANCE_{intent}', {
-            "from":             from_email,
-            "account":          account['email'],
-            "lead_psychology":  groq_result.get('lead_psychology', '') if groq_result else '',
-        })
-        _update_lead_status(from_email, intent.lower())
-
-    elif intent == 'AGENT_HANDLES':
-        reply_html = groq_reply or _tmpl_agent_handles(my_name, gp, variant_tag=variant_tag, chosen_question=chosen_question)
-        _log_audit('AGENT_HANDLES', {
-            "from":    from_email,
-            "account": account['email'],
-        })
-        _update_lead_status(from_email, 'agent_handles')
-
-    elif intent == 'NOBODY_HANDLES':
-        reply_html = groq_reply or _tmpl_nobody_handles(my_name, gp)
-        _log_audit('NOBODY_HANDLES', {
-            "from":    from_email,
-            "account": account['email'],
-        })
-        _update_lead_status(from_email, 'nobody_handles')
-
-    elif intent == 'ASSISTANT_HANDLES':
-        reply_html = groq_reply or _tmpl_assistant_handles(my_name, gp)
-        _log_audit('ASSISTANT_HANDLES', {
-            "from":    from_email,
-            "account": account["email"],
-        })
-        _update_lead_status(from_email, 'assistant_handles')
-
-    # INTERESTED: Handled as SILENT HANDOFF above - admin takes over
-
-    elif intent == 'ASKS_IDENTITY':
-        # They want to know who sent this — confirm identity confidently, no apology
-        reply_html = groq_reply or _tmpl_asks_identity(my_name, gp)
-        _log_audit('ASKS_IDENTITY', {
-            "from":      from_email,
-            "reasoning": reasoning,
-            "account":   account['email'],
-        })
-
-    elif intent == 'ACKNOWLEDGMENT_ONLY':
-        # Pattern Interrupt: re-engage with curiosity question instead of staying silent
-        reply_html = groq_reply or _tmpl_acknowledgment_only(my_name, gp)
-        _log_audit('ACKNOWLEDGMENT_ONLY', {
-            "from":      from_email,
-            "reasoning": reasoning,
-            "account":   account['email'],
-        })
-
-    elif intent == 'ASKS_PRICE':
-        reply_html = groq_reply or _tmpl_asks_price(my_name, gp)
-
-    elif intent == 'ASKS_DETAILS':
-        reply_html = groq_reply or _tmpl_asks_details(my_name, gp)
-
-    elif intent == 'PASS_UNSUB':
+    if intent == 'PASS_UNSUB':
         reply_html = groq_reply or _tmpl_pass_unsub()
         _handle_unsub(from_email)
         _log_audit('UNSUBSCRIBED', {"email": from_email})
+
+    elif intent == 'NEGATIVE_OBJECTION':
+        reply_html = groq_reply or _tmpl_negative_objection()
+        _handle_unsub(from_email)
+        _log_audit('NEGATIVE_OBJECTION', {
+            "from":      from_email,
+            "reasoning": reasoning,
+            "account":   account['email'],
+        })
 
     elif intent == 'NOT_RELEVANT':
         reply_html = groq_reply or _tmpl_not_relevant(my_name, property_address, gp)
@@ -1535,24 +1328,59 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
         })
         _update_lead_status(from_email, 'confused')
 
-    elif intent == 'NEGATIVE_OBJECTION':
-        reply_html = groq_reply or _tmpl_negative_objection()
-        # Mark do-not-contact — they clearly don't want outreach
-        _handle_unsub(from_email)
-        _log_audit('NEGATIVE_OBJECTION', {
+    else:
+        # All positive/neutral intents: Groq reply first, then inject demo link
+        reply_html = groq_reply
+
+        if not reply_html:
+            # Fall back to templates with demo link
+            if intent == 'INTERESTED':
+                reply_html = _tmpl_interested(my_name, gp, demo_link)
+            elif intent == 'PAIN_AWARE':
+                reply_html = _tmpl_nobody_handles(my_name, gp, demo_link)  # Reuse template
+            elif intent == 'ACKNOWLEDGMENT_ONLY':
+                reply_html = _tmpl_acknowledgment_only(my_name, gp, demo_link)
+            elif intent == 'ASKS_PRICE':
+                reply_html = _tmpl_asks_price(my_name, gp, demo_link)
+            elif intent == 'ASKS_DETAILS':
+                reply_html = _tmpl_asks_details(my_name, gp, demo_link)
+            elif intent == 'ASKS_IDENTITY':
+                reply_html = _tmpl_asks_identity(my_name, gp).replace(
+                    'https://replyzeai.com/goods/templates/demo', 
+                    demo_link or 'https://replyzeai.com/goods/templates/demo'
+                )
+            elif intent == 'AGENT_HANDLES':
+                reply_html = _tmpl_agent_handles(my_name, gp, demo_link)
+            elif intent == 'NOBODY_HANDLES':
+                reply_html = _tmpl_nobody_handles(my_name, gp, demo_link)
+            elif intent == 'ASSISTANT_HANDLES':
+                reply_html = _tmpl_assistant_handles(my_name, gp, demo_link)
+            else:
+                reply_html = _tmpl_unknown(my_name, gp)
+
+        # Inject demo link if Groq reply contains {{DEMO_LINK}} placeholder
+        if demo_link and reply_html and '{{DEMO_LINK}}' in reply_html:
+            reply_html = reply_html.replace('{{DEMO_LINK}}', demo_link)
+            print(f"  [{from_email}] Demo link injected into Groq reply")
+
+        # Log DEMO_DELIVERED handoff notification
+        if demo_link and intent in DEMO_LINK_INTENTS:
+            _log_audit('DEMO_DELIVERED', {
+                "from":       from_email,
+                "lead_id":    lead['id'],
+                "intent":     intent,
+                "demo_link":  demo_link,
+                "account":    account['email'],
+            })
+            _update_lead_status(from_email, f'{intent.lower()}_demo_sent')
+
+        _log_audit(f'REPLY_{intent}', {
             "from":      from_email,
             "reasoning": reasoning,
             "account":   account['email'],
         })
 
-    else:
-        # UNKNOWN or QUESTION_OTHER — queue for human review
-        reply_html = groq_reply or _tmpl_unknown(my_name, gp)
-        create_ops_ticket(from_email, subject, body_text, intent)
-        _create_human_review_ticket(from_email, subject, body_text, intent, reasoning)
-        _log_audit('OPS_TICKET_CREATED', {"from": from_email, "intent": intent})
-
-    # ── Step 7: Enqueue reply ─────────────────────────────────────────────────────
+    # ── Step 7: Enqueue reply ─────────────────────────────────────────────────
     _store_responded_lead(lead['id'], from_email, intent, body_text)
     _clear_pending_followups(lead['id'])
 
@@ -1565,14 +1393,14 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
             body=reply_html,
             thread_id=thread_id,
             in_reply_to=orig_msg_id,
-            references=orig_msg_id # Gmail handles this via thread_id/in_reply_to mostly
+            references=orig_msg_id
         )
-        auto_reply_sent = True # Marked as "sent" in terms of processed_replies because it's enqueued
+        auto_reply_sent = True
 
     # Determine if product was introduced in this reply
     pitched = (intent in ['INTERESTED', 'ASKS_PRICE', 'ASKS_DETAILS']) or (lead.get('product_introduced', False))
 
-    _update_lead_state(lead['id'], intent, product_introduced=pitched, belief_variant=variant_tag)
+    _update_lead_state(lead['id'], intent, product_introduced=pitched)
 
     _mark_processed(
         gmail_msg_id, account['email'], from_email,
