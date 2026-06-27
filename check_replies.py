@@ -874,10 +874,14 @@ def _process_one_imap_message(account: dict, raw_bytes: bytes):
             else:
                 reply_html = _tmpl_unknown(my_name, gp)
 
-        # Inject demo link if Groq reply contains {{DEMO_LINK}} placeholder
-        if demo_link and reply_html and '{{DEMO_LINK}}' in reply_html:
-            reply_html = reply_html.replace('{{DEMO_LINK}}', demo_link)
-            print(f"  [{from_email}] Demo link injected into Groq reply")
+        # Inject demo link if Groq reply contains {DEMO_LINK} or {{DEMO_LINK}} placeholder
+        if demo_link and reply_html:
+            if '{{DEMO_LINK}}' in reply_html:
+                reply_html = reply_html.replace('{{DEMO_LINK}}', demo_link)
+                print(f"  [{from_email}] Demo link injected ({{{{DEMO_LINK}}}} pattern)")
+            elif '{DEMO_LINK}' in reply_html:
+                reply_html = reply_html.replace('{DEMO_LINK}', demo_link)
+                print(f"  [{from_email}] Demo link injected ({{DEMO_LINK}} pattern)")
 
         # Log DEMO_DELIVERED handoff notification
         if demo_link and intent in DEMO_LINK_INTENTS:
@@ -1358,10 +1362,14 @@ def _process_one_message(account: dict, access_token: str, msg: dict):
             else:
                 reply_html = _tmpl_unknown(my_name, gp)
 
-        # Inject demo link if Groq reply contains {{DEMO_LINK}} placeholder
-        if demo_link and reply_html and '{{DEMO_LINK}}' in reply_html:
-            reply_html = reply_html.replace('{{DEMO_LINK}}', demo_link)
-            print(f"  [{from_email}] Demo link injected into Groq reply")
+        # Inject demo link if Groq reply contains {DEMO_LINK} or {{DEMO_LINK}} placeholder
+        if demo_link and reply_html:
+            if '{{DEMO_LINK}}' in reply_html:
+                reply_html = reply_html.replace('{{DEMO_LINK}}', demo_link)
+                print(f"  [{from_email}] Demo link injected ({{{{DEMO_LINK}}}} pattern)")
+            elif '{DEMO_LINK}' in reply_html:
+                reply_html = reply_html.replace('{DEMO_LINK}', demo_link)
+                print(f"  [{from_email}] Demo link injected ({{DEMO_LINK}} pattern)")
 
         # Log DEMO_DELIVERED handoff notification
         if demo_link and intent in DEMO_LINK_INTENTS:
