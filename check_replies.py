@@ -92,12 +92,11 @@ def get_access_token(encrypted_refresh_token: str) -> str | None:
 
 #── Phrase Randomization Pools ───────────────────────────────────────────────
 OPENERS = [
+    "Solid.",
+    "Noted.",
+    "Got it.",
     "Makes sense.",
-    "Yeah, fair enough.",
-    "Gotcha.",
-    "That tracks.",
-    "Right.",
-    "Exactly."
+    "Good call.",
 ]
 
 SITUATIONS = [
@@ -107,6 +106,9 @@ SITUATIONS = [
     "when you're tied up with a client",
     "after hours",
 ]
+
+# Safe fallback for gp.get('situation', ...) — avoids nested-quote issues in f-strings
+DEFAULT_SITUATION = "when you're busy"
 
 STYLE_MODES = [
     "brief_casual",
@@ -309,8 +311,8 @@ def _groq_analyze_reply(text: str, property_address: str = "your service area", 
         my_name=my_name,
         conversation_state=state_str,
         style_mode=gp['style_mode'],
-        opener=gp['opener'],
-        situation=gp['situation'],
+        opener=gp.get('opener', 'Got it.'),
+        situation=gp.get('situation', DEFAULT_SITUATION),
         style_mode_instruction=style_instr,
     )
 
@@ -556,53 +558,55 @@ def _tmpl_ps() -> str:
 
 def _tmpl_asks_identity(my_name: str, gp: dict, demo_link: str = None) -> str:
     link = demo_link or 'https://replyzeai.com/goods/templates/demo'
-    body = f"I'm {my_name}. We handle inbound leads instantly when you're busy {gp['situation']}. Quick overview: {link}"
+    # Use distinct fallback ("at a showing") so it never duplicates the leading "when you're busy"
+    situation_val = gp.get('situation', 'at a showing')
+    body = f"I'm {my_name}. We handle inbound leads instantly when you're busy {situation_val}. Quick overview: {link}"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_agent_handles(my_name: str, gp: dict, demo_link: str = None) -> str:
     """Concierge response for agents who handle their own replies."""
     if demo_link:
-        return f"{gp['opener']} Makes sense. Here's a quick look: {demo_link}\n\n— {my_name}"
-    return f"{gp['opener']} Makes sense. Worth a look: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
+        return f"{gp.get('opener', 'Got it.')} Sent the lead-leak report — shows what's slipping {gp.get('situation', DEFAULT_SITUATION)}: {demo_link}\n\n— {my_name}"
+    return f"{gp.get('opener', 'Got it.')} Sent the lead-leak report — shows what's slipping {gp.get('situation', DEFAULT_SITUATION)}: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
 def _tmpl_nobody_handles(my_name: str, gp: dict, demo_link: str = None) -> str:
     """Concierge response for leads who admit they miss leads."""
     if demo_link:
-        return f"{gp['opener']} That's where it gets costly — the lead just emails the next agent. Here's how we fix it: {demo_link}\n\n— {my_name}"
-    return f"{gp['opener']} That's where it gets costly — the lead just emails the next agent. Here's how we fix it: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
+        return f"{gp.get('opener', 'Got it.')} That's where it gets costly — the lead just emails the next agent. Here's how we fix it: {demo_link}\n\n— {my_name}"
+    return f"{gp.get('opener', 'Got it.')} That's where it gets costly — the lead just emails the next agent. Here's how we fix it: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
 def _tmpl_assistant_handles(my_name: str, gp: dict, demo_link: str = None) -> str:
     """Concierge response for leads with assistant/team support."""
     if demo_link:
-        return f"{gp['opener']} Helpful to have support. Sometimes things still slip through though. Quick overview: {demo_link}\n\n— {my_name}"
-    return f"{gp['opener']} Helpful to have support. Sometimes things still slip through though. Quick overview: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
+        return f"{gp.get('opener', 'Got it.')} Even with support, leads slip — your report shows exactly where: {demo_link}\n\n— {my_name}"
+    return f"{gp.get('opener', 'Got it.')} Even with support, leads slip — your report shows exactly where: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
 def _tmpl_interested(my_name: str, gp: dict, demo_link: str = None) -> str:
-    """Concierge response for interested leads — deliver the demo."""
+    """Concierge response for interested leads — deliver the personalized leak report."""
     if demo_link:
-        return f"Great! Here's a quick demo: {demo_link}\n\n— {my_name}"
-    return f"Great! Here's a quick demo: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
+        return f"{gp.get('opener', 'Got it.')} Already pulled it for {gp.get('situation', DEFAULT_SITUATION)}: {demo_link}\n\n— {my_name}"
+    return f"{gp.get('opener', 'Got it.')} Already pulled it for {gp.get('situation', DEFAULT_SITUATION)}: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
 def _tmpl_asks_price(my_name: str, gp: dict, demo_link: str = None) -> str:
-    """Concierge response for price questions — deliver the demo."""
+    """Concierge response for price questions — deliver the personalized report, answer directly."""
     if demo_link:
-        return f"It depends on your volume, but it usually pays for itself with the first saved lead. Here's a quick example: {demo_link}\n\n— {my_name}"
-    return f"It depends on your volume, but it usually pays for itself with the first saved lead. Here's a quick example: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
+        return f"{gp.get('opener', 'Got it.')} Depends on your volume — the report shows your actual leak so you can see the math for yourself: {demo_link}\n\n— {my_name}"
+    return f"{gp.get('opener', 'Got it.')} Depends on your volume — the report shows your actual leak so you can see the math for yourself: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
 def _tmpl_asks_details(my_name: str, gp: dict, demo_link: str = None) -> str:
-    """Concierge response for detail questions — deliver the demo."""
+    """Concierge response for detail questions — deliver the personalized report, answer directly."""
     if demo_link:
-        return f"Zero manual work for you. Here's how it works: {demo_link}\n\n— {my_name}"
-    return f"Zero manual work for you. Here's how it works: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
+        return f"{gp.get('opener', 'Got it.')} Here's your personalized leak report — it covers exactly what happens {gp.get('situation', DEFAULT_SITUATION)}: {demo_link}\n\n— {my_name}"
+    return f"{gp.get('opener', 'Got it.')} Here's your personalized leak report — it covers exactly what happens {gp.get('situation', DEFAULT_SITUATION)}: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
 def _tmpl_not_relevant(my_name: str, property_address: str, gp: dict) -> str:
     """Not relevant — no demo link."""
-    body = f"{gp['opener']} Looks like you might be in a different type of business — we're specifically looking for real estate agents."
+    body = f"{gp.get('opener', 'Got it.')} Looks like you might be in a different type of business — we're specifically looking for real estate agents."
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_confused(my_name: str, property_address: str, gp: dict) -> str:
-    """Confused — no demo link, offer help."""
-    body = f"Sorry for the confusion! We help real estate agents respond to inbound leads faster. Happy to clarify if you have questions."
+    """Confused — no demo link, direct to clarify."""
+    body = f"We help real estate agents stop missing inbound leads — the report shows exactly where yours are going. Happy to answer any questions."
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_pass_unsub() -> str:
@@ -611,17 +615,17 @@ def _tmpl_pass_unsub() -> str:
 
 def _tmpl_negative_objection() -> str:
     """Negative objection — no demo link."""
-    return "I apologize for the confusion. I'll correct my records right away and won't reach out again."
+    return "Noted — removing you now. Good luck with the listings."
 
 def _tmpl_acknowledgment_only(my_name: str, gp: dict, demo_link: str = None) -> str:
-    """Concierge response for acknowledgments — deliver the demo."""
+    """Concierge response for acknowledgments — deliver the personalized leak report."""
     if demo_link:
-        return f"{gp['opener']} Quick overview for you: {demo_link}\n\n— {my_name}"
-    return f"{gp['opener']} Quick overview for you: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
+        return f"{gp.get('opener', 'Got it.')} Sent your personalized lead-leak report — built around {gp.get('situation', DEFAULT_SITUATION)}: {demo_link}\n\n— {my_name}"
+    return f"{gp.get('opener', 'Got it.')} Sent your personalized lead-leak report — built around {gp.get('situation', DEFAULT_SITUATION)}: https://replyzeai.com/goods/templates/demo\n\n— {my_name}"
 
 def _tmpl_unknown(my_name: str, gp: dict) -> str:
     """Unknown intent — no demo link."""
-    return f"{gp['opener']} Thanks — got your message. I'll get back to you with more details shortly.\n\n— {my_name}"
+    return f"{gp.get('opener', 'Got it.')} Thanks — got your message. I'll get back to you with more details shortly.\n\n— {my_name}"
 
 #── Gmail helpers ─────────────────────────────────────────────────────────────
 def _get_header(headers: list, name: str) -> str:
