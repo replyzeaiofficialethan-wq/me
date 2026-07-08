@@ -247,7 +247,7 @@ ASKS_PRICE, ASKS_DETAILS:
 → Do not call it a demo
 
 ASKS_IDENTITY:
-→ Introduce yourself briefly, then deliver the Personalized Leak Report: {{DEMO_LINK}}
+→ Introduce yourself briefly with "I'm [name] with ReplyzeAI", then deliver the Personalized Leak Report: {{DEMO_LINK}}
 
 AGENT_HANDLES, NOBODY_HANDLES, ASSISTANT_HANDLES:
 → Acknowledge their situation, then deliver the Personalized Leak Report: {{DEMO_LINK}}
@@ -378,7 +378,99 @@ def _groq_analyze_reply(text: str, property_address: str = "your service area", 
 
     return None
 
-# Legacy label-only fallback (used only when _groq_analyze_reply fails entirely)
+#── First-pass intent classifier (gpt-oss-120b) ────────────────────────────────
+# Uses the strongest model for pure intent classification, no reply generation
+def _groq_classify_intent_first(text: str) -> str | None:
+    """
+    First-pass classification using gpt-oss-120b for maximum accuracy.
+    Returns just the intent label. Used before other AI models.
+    """
+    global _groq_cursor
+    if not GROQ_KEYS:
+        return None
+    
+    model = "openai/gpt-oss-120b"  # Always use the strongest model for first pass
+    
+    system_prompt = """You are an email intent classifier. Output ONLY one word.
+
+Key rules:
+- "stop" alone or with brief words = PASS_UNSUB
+- "stop" with frustration/anger/emphasis (!!, third time) = NEGATIVE_OBJECTION
+- "pass" alone = PASS_UNSUB
+- "not interested" = PASS_UNSUB
+- "stop by" (visit) = INTERESTED
+- Polite unsubscribe words = PASS_UNSUB
+
+Labels:
+INTERESTED = yes, sure, wants more, positive response, wants call/meeting
+ACKNOWLEDGMENT_ONLY = brief "ok", "thanks", "got it" 
+PASS_UNSUB = stop, pass, not interested, unsubscribe, remove me, polite decline
+ASKS_IDENTITY = who are you
+CONFUSED = doesn't understand
+NEGATIVE_OBJECTION = rude, angry, frustrated, "third time", aggressive, emphatic stop
+
+Reply with ONLY one label."""
+
+    max_attempts = len(GROQ_KEYS)
+    for i in range(max_attempts):
+        key = GROQ_KEYS[_groq_cursor % len(GROQ_KEYS)]
+        _groq_cursor += 1
+        
+        try:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {key}",
+                         "Content-Type":  "application/json"},
+                json={
+                    "model":  model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Reply: {text[:800]}"}
+                    ],
+                    "temperature": 0.0,
+                    "max_tokens": 200,
+                }, timeout=60
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data["choices"][0]["message"].get("content", "") or ""
+                reasoning = data["choices"][0]["message"].get("reasoning", "") or ""
+                content_clean = content.strip().upper()
+                
+                print(f"[GROQ FIRST PASS] Raw content: '{content}'")
+                
+                # Match content directly first
+                for valid in _GROQ_VALID_INTENTS:
+                    if content_clean == valid:
+                        print(f"[GROQ FIRST PASS] Matched: {valid}")
+                        return valid
+                
+                # Partial match for PASS_UNSUB
+                if 'PASS' in content_clean or 'UNSUB' in content_clean:
+                    return 'PASS_UNSUB'
+                
+                # If content is empty, check reasoning field (for gpt-oss models)
+                if not content_clean and reasoning:
+                    reasoning_clean = reasoning.upper()
+                    for valid in _GROQ_VALID_INTENTS:
+                        # Look for exact intent word in reasoning
+                        import re
+                        if re.search(rf'\b{valid}\b', reasoning_clean):
+                            print(f"[GROQ FIRST PASS] Matched from reasoning: {valid}")
+                            return valid
+                
+                print(f"[GROQ FIRST PASS] No valid intent found in: {content}")
+                return None
+            if resp.status_code == 429:
+                print(f"[GROQ FIRST PASS] Rate-limited, trying next key")
+                continue
+        except Exception as exc:
+            print(f"[GROQ FIRST PASS ERROR] {exc}")
+            continue
+    return None
+
+
+# Legacy label-only fallback (used after first pass and _groq_analyze_reply fail)
 def _groq_classify_llm(text: str) -> str | None:
     """
     Simple classification fallback using model rotation.
@@ -442,13 +534,13 @@ _RE_PASS_STRICT = re.compile(r'^\s*pass[.!?\s]*$', re.I)
 _RE_PASS_LOOSE  = re.compile(
     r"\b(unsubscribe|opt.?out|remove me|take me off|stop emailing| "
     r"stop contacting|don'?t (email|contact|message) me| "
-    r"no longer (interested|want))\b",
+    r"no longer (interested|want)|stop[.!?]?\s*(thanks|and|i'll|you|pls|please)?[.!?]?(?:\s|$))",
     re.I
 )
 _RE_YES = re.compile(
     r"\b(yes|yep|yeah|sure|count me in|i'?m in|let'?s do it|sounds good| "
     r"i'?d like|interested|go ahead|please do|sign me up|i want| "
-    r"set it up|let'?s try|i'?ll do it|do it|great idea|love it)\b", re.I
+    r"set it up|let'?s try|i'?ll do it|do it|great idea|love it|you can send|send it|send over)\b", re.I
 )
 _RE_PRICE = re.compile(
     r"\b(price|cost|how much|charge|fee|pricing|rates?|plans?| "
@@ -465,15 +557,15 @@ _RE_IDENTITY = re.compile(
 )
 _RE_ACKNOWLEDGMENT = re.compile(
     r"^[\s\W]*(got\sit|ok|okay|k|noted|thanks|thank\syout|thx|ty| "
-    r"will\sdo|roger|understood|acknowledged|👍|✓|✔|sounds\sgood| "
-    r"appreciate\sit|great\sthanks|good\sto\sknow)[\s\W]*$",
+    r"will\sdo|roger|understood|acknowledged|👍|✓|✔|sounds?\sgood|makes?\ssense| "
+    r"appreciate\sit|great\sthanks|good\sto\sknow|cool|alright|sounds\slike\sa\splan|makes\ssense\sto\sme)[\s\W]*$",
     re.I
 )
-_RE_AGENT_HANDLES = re.compile(r"\b(i do|me|myself|i handle|i reply)\b", re.I)
-_RE_NOBODY_HANDLES = re.compile(r"\b(nobody|no one|don't have|none|miss)\b", re.I)
+_RE_AGENT_HANDLES = re.compile(r"\b(i\sdo\smy|i\shandle\smy|i\sreply\sto|i\spersonally)\b", re.I)
+_RE_NOBODY_HANDLES = re.compile(r"\b(nobody|no one|don'?t have|none|miss)\b", re.I)
 _RE_ASSISTANT_HANDLES = re.compile(r"\b(assistant|team|secretary|va|office)\b", re.I)
 _RE_NOT_RELEVANT = re.compile(r"\b(loan officer|mortgage|transaction coordinator|property management|insurance|carpet cleaning|landscaping|home warranty|home automation|security system|renovation|remodeling|pool|pest control)\b", re.I)
-_RE_CONFUSED = re.compile(r"\b(what (do you mean|is this|are you expecting|kind of response)|is this a sales|confused|don't understand)\b", re.I)
+_RE_CONFUSED = re.compile(r"\b(what (do you mean|is this|are you expecting|kind of response)|is this a sales|confused|don'?t understand)\b", re.I)
 
 #── Auditor Frame: New regex patterns for HIGH_NUANCE intents ─────────────────
 # STATUS_TEST: Suspicious/guarded tone, testing legitimacy
@@ -493,18 +585,31 @@ _RE_PAIN_AWARE = re.compile(
 )
 
 #── Intent classifier ─────────────────────────────────────────────────────────
-def classify_intent(text: str, groq_result: dict | None = None) -> str:
+def classify_intent(text: str, groq_result: dict | None = None, first_pass_intent: str | None = None) -> str:
     """
-    Uses the pre-fetched Groq analysis when available.
-    Falls back to regex rules only if Groq is unavailable.
+    Classification hierarchy:
+    1. Pre-fetched Groq analysis (from _groq_analyze_reply)
+    2. First-pass gpt-oss-120b classifier
+    3. Simpler LLM fallback
+    4. Regex patterns (last resort)
+    5. UNKNOWN
     """
     t = text.strip()
 
-    # ── Groq-first path ───────────────────────────────────────────────────────
+    # ── 1. Pre-fetched Groq analysis ─────────────────────────────────────────
     if groq_result and groq_result.get("intent") in _GROQ_VALID_INTENTS:
         return groq_result["intent"]
 
-    # ── Regex-only fallback ───────────────────────────────────────────────────
+    # ── 2. First-pass gpt-oss-120b classifier ────────────────────────────────
+    if first_pass_intent:
+        return first_pass_intent
+
+    # ── 3. Simpler LLM fallback ──────────────────────────────────────────────
+    llm_result = _groq_classify_llm(t)
+    if llm_result:
+        return llm_result
+
+    # ── 4. Regex fallback (last resort) ──────────────────────────────────────
     
     # HIGH_NUANCE intents (Auditor Frame) — checked first for precision
     if _RE_STATUS_TEST.search(t):
@@ -518,6 +623,10 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
     
     if _RE_IDENTITY.search(t):
         return 'ASKS_IDENTITY'
+
+    # PASS_UNSUB checks BEFORE ACKNOWLEDGMENT to catch "Stop Thanks" correctly
+    if _RE_PASS_STRICT.match(t) or _RE_PASS_LOOSE.search(t):
+        return 'PASS_UNSUB'
 
     stripped = re.sub(r'(?m)^>.*$', '', t).strip()
     if _RE_ACKNOWLEDGMENT.match(stripped):
@@ -547,9 +656,6 @@ def classify_intent(text: str, groq_result: dict | None = None) -> str:
     if _RE_DETAILS.search(t):
         return 'ASKS_DETAILS'
 
-    if _RE_PASS_STRICT.match(t) or _RE_PASS_LOOSE.search(t):
-        return 'PASS_UNSUB'
-
     llm_result = _groq_classify_llm(t)
     if llm_result:
         return llm_result
@@ -564,7 +670,7 @@ def _tmpl_asks_identity(my_name: str, gp: dict, demo_link: str = None) -> str:
     link = demo_link or 'https://replyzeai.com/goods/templates/demo'
     # Use distinct fallback ("at a showing") so it never duplicates the leading "when you're busy"
     situation_val = gp.get('situation', 'at a showing')
-    body = f"I'm {my_name}. We handle inbound leads instantly when you're busy {situation_val}. Quick overview: {link}"
+    body = f"I'm {my_name} with ReplyzeAI. We handle inbound leads instantly when you're busy {situation_val}. Quick overview: {link}"
     return f"{body}\n\n— {my_name}"
 
 def _tmpl_agent_handles(my_name: str, gp: dict, demo_link: str = None) -> str:
@@ -1210,17 +1316,23 @@ def _analyze_and_handle_reply(from_email: str, body_text: str, lead: dict, my_na
         "last_intent": lead.get("last_intent")
     }
 
-    # ── Step 2: Groq analyze ──────────────────────────────────────────────────
+    # ── Step 2: First-pass classification (gpt-oss-120b) ──────────────────────
+    print(f"  [{from_email}] first-pass intent classification (gpt-oss-120b) …")
+    first_pass_intent = _groq_classify_intent_first(body_text)
+    if first_pass_intent:
+        print(f"  [{from_email}] first-pass intent: {first_pass_intent}")
+
+    # ── Step 3: Groq analyze (with reply generation) ───────────────────────────
     print(f"  [{from_email}] calling Groq analyze ({channel}) …")
     groq_result = _groq_analyze_reply(
         body_text, property_address=property_address, my_name=my_name,
         conversation_state=conversation_state, gen_params=gp
     )
 
-    # ── Step 3: Final intent ──────────────────────────────────────────────────
-    intent     = classify_intent(body_text, groq_result)
+    # ── Step 4: Final intent (uses hierarchy: groq_result > first_pass > LLM > regex) ──
+    intent     = classify_intent(body_text, groq_result, first_pass_intent)
     reasoning  = groq_result.get('reasoning', '') if groq_result else ''
-    confidence = 0.9 if groq_result else 0.5
+    confidence = 0.9 if groq_result else 0.7
     print(f"  [{from_email}] intent={intent}")
 
     # ── Step 4: Decision Logging ──────────────────────────────────────────────
