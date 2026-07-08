@@ -39,7 +39,7 @@ def aesgcm_decrypt(b64text: str) -> str:
     return AESGCM(ENCRYPTION_KEY).decrypt(nonce, ct, None).decode('utf-8')
 
 #── Demo Link Builder ─────────────────────────────────────────────────────────
-DEMO_LINK_BASE = "https://replyzeai.com/goods/templates/report2"
+DEMO_LINK_BASE = "https://replyzeai.com/goods/templates/report"
 
 def _get_email_queue_ids(lead_email: str) -> dict | None:
     """
